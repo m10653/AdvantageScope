@@ -29,20 +29,22 @@ export default class Log {
   private generatedParents: Set<string> = new Set(); // Children of these fields are generated
   private timestampRange: [number, number] | null = null;
   private enableTimestampSetCache: boolean;
+  private enableLiveSorting: boolean;
   private timestampSetCache: { [id: string]: { keys: string[]; timestamps: number[] } } = {};
 
   private queuedStructs: QueuedStructure[] = [];
   private queuedStructArrays: QueuedStructure[] = [];
   private queuedProtos: QueuedStructure[] = [];
 
-  constructor(enableTimestampSetCache = true) {
+  constructor(enableTimestampSetCache = true, enableLiveSorting = true) {
     this.enableTimestampSetCache = enableTimestampSetCache;
+    this.enableLiveSorting = enableLiveSorting;
   }
 
   /** Checks if the field exists and registers it if necessary. */
   public createBlankField(key: string, type: LoggableType) {
     if (key in this.fields) return;
-    this.fields[key] = new LogField(type);
+    this.fields[key] = new LogField(type, this.enableLiveSorting);
   }
 
   /** Clears all data before the provided timestamp. */
@@ -673,7 +675,10 @@ export default class Log {
   }
 
   /** Returns a serialized version of the data from this log. */
-  toSerialized(): any {
+  toSerialized(progressCallback: ((progress: number) => void) | undefined = undefined): any {
+    if (this.enableLiveSorting) {
+      this.enableLiveSorting = false;
+    }
     let result: any = {
       fields: {},
       generatedParents: Array.from(this.generatedParents),
@@ -684,8 +689,12 @@ export default class Log {
       queuedStructArrays: this.queuedStructArrays,
       queuedProtos: this.queuedProtos
     };
+    let totalFields = Object.keys(this.fields).length;
     Object.entries(this.fields).forEach(([key, value]) => {
       result.fields[key] = value.toSerialized();
+      if (progressCallback != undefined) {
+        progressCallback(Object.keys(result.fields).length / totalFields);
+      }
     });
     return result;
   }
