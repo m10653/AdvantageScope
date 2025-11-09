@@ -62,6 +62,7 @@ import { VideoProcessor } from "./VideoProcessor";
 import { getAssetDownloadStatus, startAssetDownload } from "./assetsDownload";
 import { convertLegacyAssets, createAssetFolders, getUserAssetsPath, loadAssets } from "./assetsUtil";
 import { checkHootIsPro, convertHoot, copyOwlet } from "./hootUtil";
+import CommandLineHandler from "./CommandLineHandler";
 
 // Global variables
 let hubWindows: BrowserWindow[] = []; // Ordered by last focus time (recent first)
@@ -102,6 +103,9 @@ let downloadRefreshInterval: NodeJS.Timeout | null = null;
 let downloadAddress: string = "";
 let downloadPath: string = "";
 let downloadFileSizeCache: { [id: string]: number } = {};
+
+let cliHandler = new CommandLineHandler();
+cliHandler.parseArgs();
 
 // WINDOW MESSAGE HANDLING
 

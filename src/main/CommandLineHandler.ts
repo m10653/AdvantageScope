@@ -1,0 +1,126 @@
+import { ArgumentParser, SubParser } from "argparse";
+import ExportOptions from "../shared/ExportOptions";
+import fs from "fs";
+import Log from "../shared/log/Log";
+import WPILOGLoader from "../hub/dataSources/wpilog/WPILOGFileLoader";
+import LogExporter from "../hub/LogExporter";
+import { xgcd } from "mathjs";
+export default class CommandLineHandler {
+  private parser: ArgumentParser;
+  private subparsers: SubParser;
+  constructor() {
+    this.parser = new ArgumentParser({
+      description: "AdvantageScope CLI"
+    });
+
+    this.subparsers = this.parser.add_subparsers({
+      title: "subcommands",
+      description: "AdvantageScope subcommands",
+      help: "Additional help",
+      dest: "command"
+    });
+
+    this.setupConvertParser();
+  }
+
+  public async parseArgs() {
+    let out = this.parser.parse_args();
+
+    if (out.command === "convert") {
+      let logs: Log[] = [];
+      for (let file of out.input) {
+        let data = fs.readFileSync(file); //TODO Error handling
+        if (file.endsWith(".wpilog")) {
+          try {
+            let logLoad = WPILOGLoader.loadFile(data);
+            logs.push(logLoad.log);
+          } catch (e) {
+            this.parser.error("Failed to load log: " + file);
+            process.exit(1);
+          }
+        } else {
+          //TODO maybe to file Mime/magic detection
+          this.parser.error("Unknown log file type: " + file);
+          process.exit(1);
+        }
+        // rlog
+        // dsevents
+        // dslogs
+        // hoot
+      }
+      if (logs.length === 0) {
+        this.parser.error("No logs loaded, exiting...");
+        process.exit(1);
+      }
+      let mergedLog = Log.mergeLogs(logs);
+      let options: ExportOptions = {
+        format: out.format,
+        samplingMode: out["sampling-mode"],
+        samplingPeriod: out["sampling-period"],
+        prefixes: out.prefixes,
+        includeGenerated: out["include-generated"]
+      };
+      fs.writeFileSync(out.output, await LogExporter.generateBin(mergedLog, options));
+    }
+    // return this.parser.parse_args();
+  }
+  private fileTypeCheck(parser: ArgumentParser, filename: string, fileFlags: fs.OpenMode) {
+    try {
+      let fileDescriptor = fs.openSync(filename, fileFlags);
+      fs.closeSync(fileDescriptor);
+      return filename;
+    } catch (e) {
+      parser.error(`Error Opening File: ${filename} \n ${e}`);
+    }
+  }
+  private setupConvertParser() {
+    const convertParser = this.subparsers.add_parser("convert", { help: "Convert log files" });
+
+    convertParser.add_argument("--input", {
+      help: "Input log files",
+      required: true,
+      type: (x: string) => {
+        return this.fileTypeCheck(this.parser, x, "r");
+      },
+      nargs: "+"
+    });
+
+    convertParser.add_argument("--output", {
+      help: "Output file",
+      type: (x: string) => {
+        return this.fileTypeCheck(this.parser, x, "w");
+      },
+      required: true
+    });
+
+    convertParser.add_argument("--format", {
+      help: "Export format",
+      choices: ["csv-table", "csv-list", "wpilog", "mcap"],
+      required: true
+    });
+
+    convertParser.add_argument("--sampling-mode", {
+      help: "Sampling mode",
+      choices: ["changes", "fixed", "akit"],
+      default: "changes",
+      required: false
+    });
+    convertParser.add_argument("--sampling-period", {
+      help: "Sampling period (milliseconds)",
+      default: 20,
+      type: "int",
+      required: false
+    });
+    convertParser.add_argument("--prefixes", {
+      help: "Prefixes to use",
+      default: "",
+      required: false
+    });
+    convertParser.add_argument("--include-generated", {
+      help: "Include generated data",
+      default: true,
+      action: "store_true",
+      required: false
+    });
+  }
+}
