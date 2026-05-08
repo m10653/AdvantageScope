@@ -6,6 +6,8 @@ import WPILOGLoader from "../hub/dataSources/wpilog/WPILOGFileLoader";
 import LogExporter from "../hub/LogExporter";
 import ExportOptions from "../shared/ExportOptions";
 import Log from "../shared/log/Log";
+import { PREFS_FILENAME } from "./electron/ElectronConstants";
+import { convertHoot } from "./electron/owletInterface";
 import fs from "fs";
 
 export default class CommandLineHandler {
@@ -34,7 +36,7 @@ export default class CommandLineHandler {
       let logs: Log[] = [];
       for (let file of out.input) {
         try {
-          let log = this.loadLog(file);
+          let log = await this.loadLog(file, { acceptCtreLicense: out["accept-ctre-license"] });
           logs.push(log);
         } catch (e) {
           process.stderr.write(`error: Failed to load ${file}: ${e}\n`);
@@ -60,7 +62,7 @@ export default class CommandLineHandler {
     }
   }
 
-  private loadLog(file: string): Log {
+  private async loadLog(file: string, opts: { acceptCtreLicense: boolean }): Promise<Log> {
     let data = fs.readFileSync(file);
 
     if (file.endsWith(".wpilog")) {
@@ -91,10 +93,40 @@ export default class CommandLineHandler {
     }
 
     if (file.endsWith(".hoot")) {
-      throw new Error(".hoot files require the owlet tool which is not available in CLI mode. Convert to .wpilog first using CTRE's tooling.");
+      return this.loadHoot(file, opts.acceptCtreLicense);
     }
 
-    throw new Error(`Unrecognized file extension. Supported: .wpilog, .rlog, .dslog, .dsevents`);
+    throw new Error(`Unrecognized file extension. Supported: .wpilog, .rlog, .dslog, .dsevents, .hoot`);
+  }
+
+  private async loadHoot(file: string, acceptCtreLicense: boolean): Promise<Log> {
+    // Check CTRE license acceptance
+    let prefs: { ctreLicenseAccepted?: boolean } = {};
+    if (fs.existsSync(PREFS_FILENAME)) {
+      try {
+        prefs = JSON.parse(fs.readFileSync(PREFS_FILENAME, "utf8"));
+      } catch {}
+    }
+
+    if (!prefs.ctreLicenseAccepted) {
+      if (!acceptCtreLicense) {
+        throw new Error(
+          "Hoot decoding requires agreement to the CTRE license.\n" +
+            "  Pass --accept-ctre-license to accept and proceed, or open AdvantageScope GUI to accept first.\n" +
+            "  License: https://raw.githubusercontent.com/CrossTheRoadElec/Phoenix-Releases/refs/heads/master/CTRE_LICENSE.txt"
+        );
+      }
+      // Persist acceptance so GUI and future CLI runs don't re-prompt
+      prefs.ctreLicenseAccepted = true;
+      fs.writeFileSync(PREFS_FILENAME, JSON.stringify(prefs, null, 2));
+    }
+
+    let wpilogPath = await convertHoot(file);
+    try {
+      return WPILOGLoader.loadFile(fs.readFileSync(wpilogPath)).log;
+    } finally {
+      fs.rmSync(wpilogPath, { force: true });
+    }
   }
 
   private fileTypeCheck(parser: ArgumentParser, filename: string, fileFlags: fs.OpenMode) {
@@ -111,7 +143,7 @@ export default class CommandLineHandler {
     const convertParser = this.subparsers.add_parser("convert", { help: "Convert log files" });
 
     convertParser.add_argument("--input", {
-      help: "Input log files (.wpilog, .rlog, .dslog, .dsevents)",
+      help: "Input log files (.wpilog, .rlog, .dslog, .dsevents, .hoot)",
       required: true,
       type: (x: string) => this.fileTypeCheck(this.parser, x, "r"),
       nargs: "+"
@@ -152,6 +184,13 @@ export default class CommandLineHandler {
     convertParser.add_argument("--include-generated", {
       help: "Include generated/derived fields (default: true)",
       default: true,
+      action: "store_true",
+      required: false
+    });
+
+    convertParser.add_argument("--accept-ctre-license", {
+      help: "Accept the CTRE license agreement required for .hoot file decoding",
+      default: false,
       action: "store_true",
       required: false
     });
