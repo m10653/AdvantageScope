@@ -65,11 +65,18 @@ export default class CommandLineHandler {
         prefixes: out.prefixes,
         includeGenerated: out["include-generated"]
       };
-      let result = await LogExporter.generateBin(mergedLog, options, (v) =>
-        this.showProgress("Exporting", v)
-      );
+      let result: Uint8Array | string;
+      try {
+        result = await LogExporter.generateBin(mergedLog, options, (v) =>
+          this.showProgress("Exporting", v)
+        );
+      } catch (e) {
+        this.clearProgress();
+        process.stderr.write(`error: Export failed: ${e}\n`);
+        process.exit(1);
+      }
       this.clearProgress();
-      fs.writeFileSync(out.output, result);
+      fs.writeFileSync(out.output, result!);
       process.stderr.write(`Done: ${out.output}\n`);
     }
   }
