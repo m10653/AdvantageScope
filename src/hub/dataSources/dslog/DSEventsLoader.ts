@@ -7,7 +7,7 @@ export default class DSEventsLoader {
       progress(1); // Loading is fast and we don't know how long dslog vs dsevents will take
     }
     let dsEvents = new DSEventsReader(data);
-    let log = new Log(false, false);
+    let log = new Log(false);
     if (!dsEvents.isSupportedVersion()) {
       throw new Error("Unsupported dsEvent version");
     }

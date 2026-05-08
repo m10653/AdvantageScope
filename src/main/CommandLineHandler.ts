@@ -51,7 +51,10 @@ export default class CommandLineHandler {
         this.parser.error("No logs loaded, exiting...");
         process.exit(1);
       }
-      let mergedLog = Log.mergeLogs(logs);
+      let mergedLog = logs[0];
+      for (let i = 1; i < logs.length; i++) {
+        mergedLog.mergeWith(logs[i]);
+      }
       let options: ExportOptions = {
         format: out.format,
         samplingMode: out["sampling-mode"],

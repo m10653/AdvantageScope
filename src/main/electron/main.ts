@@ -88,6 +88,7 @@ import {
 } from "./betaUtil";
 import { getOwletDownloadStatus, startOwletDownloadLoop } from "./owletDownloadLoop";
 import { checkHootIsPro, convertHoot, CTRE_LICENSE_URL } from "./owletInterface";
+import CommandLineHandler from "../CommandLineHandler";
 
 // Dynamically load lzma-native to handle platforms without prebuilt binaries
 let lzma: typeof import("lzma-native") | null = null;
@@ -3434,7 +3435,19 @@ if (process.platform === "linux") {
   }
 }
 
-app.whenReady().then(() => {
+const CLI_MODE = process.argv.some((x) => x === "convert");
+
+app.whenReady().then(async () => {
+  if (CLI_MODE) {
+    try {
+      await new CommandLineHandler().parseArgs();
+    } catch {
+      process.exit(1);
+    }
+    process.exit(0);
+    return;
+  }
+
   // Check preferences and set theme
   let prefs = DEFAULT_PREFS;
   if (process.platform === "linux") {

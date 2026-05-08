@@ -146,14 +146,9 @@ export default class WPILOGLoader extends LogLoader {
       }
     });
 
+    if (progress) progress(1);
     return {
-      serializedLog: log.toSerialized((x) => {
-        //TODO: need to remove this hack, only way to finish import is to serialize the log even though that is not needed all the times and is not clear/transparent what is actualy happening.
-        //TODO: Time limit/update limit progress updates here
-        if (progress) {
-          progress(0.2 + x * 0.8);
-        }
-      }),
+      serializedLog: log.toSerialized(),
       log: log
     };
   }
