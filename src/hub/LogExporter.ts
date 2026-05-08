@@ -71,6 +71,8 @@ export default class LogExporter {
         return LogExporter.generateWPILOG(log, fields, timestamps, progress);
       case "mcap":
         return await LogExporter.generateMCAP(log, fields, timestamps, progress);
+      case "json":
+        return LogExporter.generateJSON(log, fields, timestamps, progress);
     }
   }
 
@@ -163,6 +165,47 @@ export default class LogExporter {
     let text = rows.map((x) => x.join(",")).join("\n");
     progress(1);
     return text;
+  }
+
+  static generateJSON(
+    log: Log,
+    fields: string[],
+    timestamps?: number[],
+    progress: (progress: number) => void = (progress) => {}
+  ): string {
+    let result: { [field: string]: { type: string; values: { timestamp: number; value: any }[] } } = {};
+
+    fields.forEach((field, fieldIndex) => {
+      let fieldData = log.getRange(field, -Infinity, Infinity);
+      let fieldType = log.getType(field);
+      if (fieldData === undefined || fieldType === null) return;
+
+      let typeName = LoggableType[fieldType];
+      let entries: { timestamp: number; value: any }[] = [];
+
+      if (timestamps === undefined) {
+        fieldData.values.forEach((value, valueIndex) => {
+          if (fieldData === undefined) return;
+          entries.push({ timestamp: fieldData.timestamps[valueIndex], value });
+          progress((fieldIndex + valueIndex / fieldData.values.length) / fields.length);
+        });
+      } else {
+        timestamps.forEach((timestamp, timestampIndex) => {
+          if (fieldData === undefined) return;
+          let nextIndex = fieldData.timestamps.findIndex((v) => v > timestamp);
+          if (nextIndex === -1) nextIndex = fieldData.timestamps.length;
+          let value: any = null;
+          if (nextIndex !== 0) value = fieldData.values[nextIndex - 1];
+          entries.push({ timestamp, value });
+          progress((fieldIndex + timestampIndex / timestamps.length) / fields.length);
+        });
+      }
+
+      result[field] = { type: typeName, values: entries };
+    });
+
+    progress(1);
+    return JSON.stringify(result, null, 2);
   }
 
   static generateWPILOG(

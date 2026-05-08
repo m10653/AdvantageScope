@@ -3435,7 +3435,8 @@ if (process.platform === "linux") {
   }
 }
 
-const CLI_MODE = process.argv.some((x) => x === "convert");
+const CLI_SUBCOMMANDS = ["convert", "info"];
+const CLI_MODE = process.argv.some((x) => CLI_SUBCOMMANDS.includes(x));
 
 app.whenReady().then(async () => {
   if (CLI_MODE) {

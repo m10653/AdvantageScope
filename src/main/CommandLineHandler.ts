@@ -6,10 +6,13 @@ import WPILOGLoader from "../hub/dataSources/wpilog/WPILOGFileLoader";
 import LogExporter from "../hub/LogExporter";
 import ExportOptions from "../shared/ExportOptions";
 import Log from "../shared/log/Log";
+import LoggableType from "../shared/log/LoggableType";
 import { PREFS_FILENAME } from "./electron/ElectronConstants";
 import { convertHoot } from "./electron/owletInterface";
 import fs from "fs";
 import path from "path";
+
+const SUPPORTED_EXTENSIONS = [".wpilog", ".rlog", ".dslog", ".dsevents", ".hoot"];
 
 export default class CommandLineHandler {
   private parser: ArgumentParser;
@@ -28,6 +31,7 @@ export default class CommandLineHandler {
     });
 
     this.setupConvertParser();
+    this.setupInfoParser();
   }
 
   public async parseArgs() {
@@ -35,7 +39,7 @@ export default class CommandLineHandler {
 
     if (out.command === "convert") {
       let logs: Log[] = [];
-      for (let file of out.input) {
+      for (let file of this.expandInputs(out.input)) {
         try {
           let label = path.basename(file);
           let log = await this.loadLog(file, {
@@ -79,6 +83,44 @@ export default class CommandLineHandler {
       fs.writeFileSync(out.output, result!);
       process.stderr.write(`Done: ${out.output}\n`);
     }
+
+    if (out.command === "info") {
+      let log: Log;
+      try {
+        let label = path.basename(out.input);
+        log = await this.loadLog(out.input, {
+          acceptCtreLicense: out["accept-ctre-license"],
+          progress: (v) => this.showProgress(`Loading ${label}`, v)
+        });
+        this.clearProgress();
+      } catch (e) {
+        this.clearProgress();
+        process.stderr.write(`error: Failed to load ${out.input}: ${e}\n`);
+        process.exit(1);
+        return;
+      }
+
+      let range = log.getTimestampRange();
+      let duration = range[1] - range[0];
+      let fieldKeys = log.getFieldKeys().filter((k) => log.getType(k) !== LoggableType.Empty);
+
+      process.stdout.write(`File:      ${out.input}\n`);
+      process.stdout.write(`Duration:  ${duration.toFixed(3)}s  (${range[0].toFixed(3)}s – ${range[1].toFixed(3)}s)\n`);
+      process.stdout.write(`Fields:    ${fieldKeys.length}\n`);
+
+      if (out.fields) {
+        process.stdout.write(`\n`);
+        fieldKeys.sort().forEach((key) => {
+          let type = log.getType(key);
+          let typeName = type !== null ? LoggableType[type] : "Unknown";
+          let wpilibType = log.getWpilibType(key);
+          let unit = log.getUnit(key);
+          let suffix = wpilibType ? ` [${wpilibType}]` : "";
+          if (unit) suffix += ` (${unit})`;
+          process.stdout.write(`  ${typeName.padEnd(14)} ${key}${suffix}\n`);
+        });
+      }
+    }
   }
 
   private async loadLog(
@@ -117,7 +159,7 @@ export default class CommandLineHandler {
       return this.loadHoot(file, opts.acceptCtreLicense, opts.progress);
     }
 
-    throw new Error(`Unrecognized file extension. Supported: .wpilog, .rlog, .dslog, .dsevents, .hoot`);
+    throw new Error(`Unrecognized file extension. Supported: ${SUPPORTED_EXTENSIONS.join(", ")}`);
   }
 
   private async loadHoot(
@@ -162,10 +204,32 @@ export default class CommandLineHandler {
   }
 
   private validateInputPath(filename: string): string {
-    if (!fs.existsSync(filename)) {
-      this.parser.error(`Input file not found: ${filename}`);
+    let stat = fs.existsSync(filename) ? fs.statSync(filename) : null;
+    if (!stat) {
+      this.parser.error(`Input not found: ${filename}`);
     }
     return filename;
+  }
+
+  private expandInputs(inputs: string[]): string[] {
+    let expanded: string[] = [];
+    for (let input of inputs) {
+      let stat = fs.existsSync(input) ? fs.statSync(input) : null;
+      if (stat && stat.isDirectory()) {
+        let entries = fs.readdirSync(input);
+        let logFiles = entries
+          .filter((e) => SUPPORTED_EXTENSIONS.some((ext) => e.endsWith(ext)))
+          .map((e) => path.join(input, e))
+          .sort();
+        if (logFiles.length === 0) {
+          process.stderr.write(`warning: no log files found in directory: ${input}\n`);
+        }
+        expanded.push(...logFiles);
+      } else {
+        expanded.push(input);
+      }
+    }
+    return expanded;
   }
 
   private validateOutputPath(filename: string): string {
@@ -183,7 +247,7 @@ export default class CommandLineHandler {
     const convertParser = this.subparsers.add_parser("convert", { help: "Convert log files" });
 
     convertParser.add_argument("--input", {
-      help: "Input log files (.wpilog, .rlog, .dslog, .dsevents, .hoot)",
+      help: `Input log files or directories (${SUPPORTED_EXTENSIONS.join(", ")})`,
       required: true,
       type: (x: string) => this.validateInputPath(x),
       nargs: "+"
@@ -197,7 +261,7 @@ export default class CommandLineHandler {
 
     convertParser.add_argument("--format", {
       help: "Export format",
-      choices: ["csv-table", "csv-list", "wpilog", "mcap"],
+      choices: ["csv-table", "csv-list", "wpilog", "mcap", "json"],
       required: true
     });
 
@@ -229,6 +293,30 @@ export default class CommandLineHandler {
     });
 
     convertParser.add_argument("--accept-ctre-license", {
+      help: "Accept the CTRE license agreement required for .hoot file decoding",
+      default: false,
+      action: "store_true",
+      required: false
+    });
+  }
+
+  private setupInfoParser() {
+    const infoParser = this.subparsers.add_parser("info", { help: "Show log file metadata" });
+
+    infoParser.add_argument("--input", {
+      help: `Input log file (${SUPPORTED_EXTENSIONS.join(", ")})`,
+      required: true,
+      type: (x: string) => this.validateInputPath(x)
+    });
+
+    infoParser.add_argument("--fields", {
+      help: "List all fields with their types",
+      action: "store_true",
+      default: false,
+      required: false
+    });
+
+    infoParser.add_argument("--accept-ctre-license", {
       help: "Accept the CTRE license agreement required for .hoot file decoding",
       default: false,
       action: "store_true",
