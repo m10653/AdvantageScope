@@ -9,6 +9,7 @@ import Log from "../shared/log/Log";
 import { PREFS_FILENAME } from "./electron/ElectronConstants";
 import { convertHoot } from "./electron/owletInterface";
 import fs from "fs";
+import path from "path";
 
 export default class CommandLineHandler {
   private parser: ArgumentParser;
@@ -36,9 +37,15 @@ export default class CommandLineHandler {
       let logs: Log[] = [];
       for (let file of out.input) {
         try {
-          let log = await this.loadLog(file, { acceptCtreLicense: out["accept-ctre-license"] });
+          let label = path.basename(file);
+          let log = await this.loadLog(file, {
+            acceptCtreLicense: out["accept-ctre-license"],
+            progress: (v) => this.showProgress(`Loading ${label}`, v)
+          });
+          this.clearProgress();
           logs.push(log);
         } catch (e) {
+          this.clearProgress();
           process.stderr.write(`error: Failed to load ${file}: ${e}\n`);
           process.exit(1);
         }
@@ -58,21 +65,29 @@ export default class CommandLineHandler {
         prefixes: out.prefixes,
         includeGenerated: out["include-generated"]
       };
-      fs.writeFileSync(out.output, await LogExporter.generateBin(mergedLog, options));
+      let result = await LogExporter.generateBin(mergedLog, options, (v) =>
+        this.showProgress("Exporting", v)
+      );
+      this.clearProgress();
+      fs.writeFileSync(out.output, result);
+      process.stderr.write(`Done: ${out.output}\n`);
     }
   }
 
-  private async loadLog(file: string, opts: { acceptCtreLicense: boolean }): Promise<Log> {
+  private async loadLog(
+    file: string,
+    opts: { acceptCtreLicense: boolean; progress: (v: number) => void }
+  ): Promise<Log> {
     let data = fs.readFileSync(file);
 
     if (file.endsWith(".wpilog")) {
-      return WPILOGLoader.loadFile(data).log;
+      return WPILOGLoader.loadFile(data, opts.progress).log;
     }
 
     if (file.endsWith(".rlog")) {
       let log = new Log(false);
       let decoder = new RLOGDecoder(true);
-      if (!decoder.decode(log, data)) {
+      if (!decoder.decode(log, data, opts.progress)) {
         throw new Error("RLOGDecoder reported failure");
       }
       return log;
@@ -80,7 +95,6 @@ export default class CommandLineHandler {
 
     if (file.endsWith(".dslog")) {
       let log = DSLogLoader.loadFile(data);
-      // Auto-load matching .dsevents sidecar if present
       let eventsPath = file.slice(0, -".dslog".length) + ".dsevents";
       if (fs.existsSync(eventsPath)) {
         log.mergeWith(DSEventsLoader.loadFile(fs.readFileSync(eventsPath)));
@@ -93,14 +107,17 @@ export default class CommandLineHandler {
     }
 
     if (file.endsWith(".hoot")) {
-      return this.loadHoot(file, opts.acceptCtreLicense);
+      return this.loadHoot(file, opts.acceptCtreLicense, opts.progress);
     }
 
     throw new Error(`Unrecognized file extension. Supported: .wpilog, .rlog, .dslog, .dsevents, .hoot`);
   }
 
-  private async loadHoot(file: string, acceptCtreLicense: boolean): Promise<Log> {
-    // Check CTRE license acceptance
+  private async loadHoot(
+    file: string,
+    acceptCtreLicense: boolean,
+    progress: (v: number) => void
+  ): Promise<Log> {
     let prefs: { ctreLicenseAccepted?: boolean } = {};
     if (fs.existsSync(PREFS_FILENAME)) {
       try {
@@ -116,27 +133,43 @@ export default class CommandLineHandler {
             "  License: https://raw.githubusercontent.com/CrossTheRoadElec/Phoenix-Releases/refs/heads/master/CTRE_LICENSE.txt"
         );
       }
-      // Persist acceptance so GUI and future CLI runs don't re-prompt
       prefs.ctreLicenseAccepted = true;
       fs.writeFileSync(PREFS_FILENAME, JSON.stringify(prefs, null, 2));
     }
 
     let wpilogPath = await convertHoot(file);
     try {
-      return WPILOGLoader.loadFile(fs.readFileSync(wpilogPath)).log;
+      return WPILOGLoader.loadFile(fs.readFileSync(wpilogPath), progress).log;
     } finally {
       fs.rmSync(wpilogPath, { force: true });
     }
   }
 
-  private fileTypeCheck(parser: ArgumentParser, filename: string, fileFlags: fs.OpenMode) {
-    try {
-      let fileDescriptor = fs.openSync(filename, fileFlags);
-      fs.closeSync(fileDescriptor);
-      return filename;
-    } catch (e) {
-      parser.error(`Error opening file: ${filename}\n${e}`);
+  private showProgress(label: string, value: number) {
+    let pct = Math.round(value * 100);
+    process.stderr.write(`\r${label}: ${pct}%   `);
+  }
+
+  private clearProgress() {
+    process.stderr.write("\r\x1b[K");
+  }
+
+  private validateInputPath(filename: string): string {
+    if (!fs.existsSync(filename)) {
+      this.parser.error(`Input file not found: ${filename}`);
     }
+    return filename;
+  }
+
+  private validateOutputPath(filename: string): string {
+    let dir = path.dirname(path.resolve(filename));
+    if (!fs.existsSync(dir)) {
+      this.parser.error(`Output directory does not exist: ${dir}`);
+    }
+    if (fs.existsSync(filename)) {
+      process.stderr.write(`warning: output file will be overwritten: ${filename}\n`);
+    }
+    return filename;
   }
 
   private setupConvertParser() {
@@ -145,14 +178,14 @@ export default class CommandLineHandler {
     convertParser.add_argument("--input", {
       help: "Input log files (.wpilog, .rlog, .dslog, .dsevents, .hoot)",
       required: true,
-      type: (x: string) => this.fileTypeCheck(this.parser, x, "r"),
+      type: (x: string) => this.validateInputPath(x),
       nargs: "+"
     });
 
     convertParser.add_argument("--output", {
       help: "Output file path",
-      type: (x: string) => this.fileTypeCheck(this.parser, x, "w"),
-      required: true
+      required: true,
+      type: (x: string) => this.validateOutputPath(x)
     });
 
     convertParser.add_argument("--format", {
