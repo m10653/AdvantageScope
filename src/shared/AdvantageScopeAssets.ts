@@ -1,15 +1,32 @@
-import { convert } from "./units";
+// Copyright (c) 2021-2026 Littleton Robotics
+// http://github.com/Mechanical-Advantage
+//
+// Use of this source code is governed by a BSD
+// license that can be found in the LICENSE file
+// at the root directory of this project.
 
-export const STANDARD_FIELD_LENGTH = convert(54, "feet", "meters");
-export const STANDARD_FIELD_WIDTH = convert(27, "feet", "meters");
-export const ALLIANCE_STATION_WIDTH = convert(69, "inches", "meters");
-export const DEFAULT_DRIVER_STATIONS: [number, number][] = [
-  [-STANDARD_FIELD_LENGTH / 2, ALLIANCE_STATION_WIDTH],
-  [-STANDARD_FIELD_LENGTH / 2, 0],
-  [-STANDARD_FIELD_LENGTH / 2, -ALLIANCE_STATION_WIDTH],
-  [STANDARD_FIELD_LENGTH / 2, -ALLIANCE_STATION_WIDTH],
-  [STANDARD_FIELD_LENGTH / 2, 0],
-  [STANDARD_FIELD_LENGTH / 2, ALLIANCE_STATION_WIDTH]
+import { Units } from "./units";
+
+export const FRC_STANDARD_FIELD_LENGTH = Units.convert(54, "feet", "meters");
+export const FRC_STANDARD_FIELD_WIDTH = Units.convert(27, "feet", "meters");
+export const FTC_STANDARD_FIELD_LENGTH = Units.convert(12, "feet", "meters");
+export const FTC_STANDARD_FIELD_WIDTH = Units.convert(12, "feet", "meters");
+
+export const ALLIANCE_STATION_WIDTH = Units.convert(69, "inches", "meters");
+export const DEFAULT_DRIVER_STATIONS_FRC: [number, number][] = [
+  [FRC_STANDARD_FIELD_LENGTH / 2, -ALLIANCE_STATION_WIDTH],
+  [FRC_STANDARD_FIELD_LENGTH / 2, 0],
+  [FRC_STANDARD_FIELD_LENGTH / 2, ALLIANCE_STATION_WIDTH],
+  [-FRC_STANDARD_FIELD_LENGTH / 2, ALLIANCE_STATION_WIDTH],
+  [-FRC_STANDARD_FIELD_LENGTH / 2, 0],
+  [-FRC_STANDARD_FIELD_LENGTH / 2, -ALLIANCE_STATION_WIDTH]
+];
+const DEFAULT_DRIVER_STATION_Y_OFFSET_FTC = FTC_STANDARD_FIELD_LENGTH / 2 + Units.convert(39, "inches", "meters");
+export const DEFAULT_DRIVER_STATIONS_FTC: [number, number][] = [
+  [DEFAULT_DRIVER_STATION_Y_OFFSET_FTC, -FTC_STANDARD_FIELD_WIDTH / 6],
+  [DEFAULT_DRIVER_STATION_Y_OFFSET_FTC, FTC_STANDARD_FIELD_WIDTH / 6],
+  [-DEFAULT_DRIVER_STATION_Y_OFFSET_FTC, FTC_STANDARD_FIELD_WIDTH / 6],
+  [-DEFAULT_DRIVER_STATION_Y_OFFSET_FTC, -FTC_STANDARD_FIELD_WIDTH / 6]
 ];
 
 export interface AdvantageScopeAssets {
@@ -20,29 +37,40 @@ export interface AdvantageScopeAssets {
   loadFailures: string[];
 }
 
+export type CoordinateSystem =
+  | "wall-alliance" // FRC 2022
+  | "wall-blue" // FRC 2023-2026
+  | "center-rotated" // FTC traditional
+  | "center-red"; // Systemcore
+
 export interface Config2d {
   name: string;
   path: string;
+  id: string;
 
+  isFTC: boolean;
+  coordinateSystem: CoordinateSystem;
   sourceUrl?: string;
   topLeft: [number, number];
   bottomRight: [number, number];
   widthInches: number;
   heightInches: number;
-  defaultOrigin: "auto" | "blue" | "red";
 }
 
 export interface Config3dField {
   name: string;
   path: string;
+  id: string;
 
-  sourceUrl?: string;
+  isFTC: boolean;
+  coordinateSystem: CoordinateSystem;
   rotations: Config3d_Rotation[];
+  position: [number, number, number];
   widthInches: number;
   heightInches: number;
-  defaultOrigin: "auto" | "blue" | "red";
   driverStations: [number, number][];
   gamePieces: Config3dField_GamePiece[];
+  aprilTags: Config3dField_AprilTag[];
 }
 
 export interface Config3dField_GamePiece {
@@ -52,7 +80,9 @@ export interface Config3dField_GamePiece {
   stagedObjects: string[];
 }
 
-export interface Config3dField_GamePieceLocation {
+export interface Config3dField_AprilTag {
+  variant: string;
+  id: number;
   rotations: Config3d_Rotation[];
   position: [number, number, number];
 }
@@ -61,7 +91,8 @@ export interface Config3dRobot {
   name: string;
   path: string;
 
-  sourceUrl?: string;
+  isFTC: boolean;
+  disableSimplification: boolean;
   rotations: Config3d_Rotation[];
   position: [number, number, number];
   cameras: Config3dRobot_Camera[];
@@ -123,3 +154,62 @@ export interface ConfigJoystick_Axis {
   sourceIndex: number;
   sourceRange: [number, number]; // Min greater than max to invert
 }
+
+export const BuiltIn3dFields: Config3dField[] = [
+  {
+    name: "Evergreen",
+    path: "",
+    id: "FRC:Evergreen",
+    isFTC: false,
+    coordinateSystem: "wall-blue",
+    rotations: [],
+    position: [0, 0, 0],
+    widthInches: Units.convert(FRC_STANDARD_FIELD_LENGTH, "meters", "inches"),
+    heightInches: Units.convert(FRC_STANDARD_FIELD_WIDTH, "meters", "inches"),
+    driverStations: DEFAULT_DRIVER_STATIONS_FRC,
+    gamePieces: [],
+    aprilTags: []
+  },
+  {
+    name: "Evergreen",
+    path: "",
+    id: "FTC:Evergreen",
+    isFTC: true,
+    coordinateSystem: "center-rotated",
+    rotations: [],
+    position: [0, 0, 0],
+    widthInches: Units.convert(FTC_STANDARD_FIELD_LENGTH, "meters", "inches"),
+    heightInches: Units.convert(FTC_STANDARD_FIELD_WIDTH, "meters", "inches"),
+    driverStations: DEFAULT_DRIVER_STATIONS_FTC,
+    gamePieces: [],
+    aprilTags: []
+  },
+  {
+    name: "Axes",
+    path: "",
+    id: "FRC:Axes",
+    isFTC: false,
+    coordinateSystem: "wall-blue",
+    rotations: [],
+    position: [0, 0, 0],
+    widthInches: Units.convert(FRC_STANDARD_FIELD_LENGTH, "meters", "inches"),
+    heightInches: Units.convert(FRC_STANDARD_FIELD_WIDTH, "meters", "inches"),
+    driverStations: DEFAULT_DRIVER_STATIONS_FRC,
+    gamePieces: [],
+    aprilTags: []
+  },
+  {
+    name: "Axes",
+    path: "",
+    id: "FTC:Axes",
+    isFTC: true,
+    coordinateSystem: "center-rotated",
+    rotations: [],
+    position: [0, 0, 0],
+    widthInches: Units.convert(FTC_STANDARD_FIELD_LENGTH, "meters", "inches"),
+    heightInches: Units.convert(FTC_STANDARD_FIELD_WIDTH, "meters", "inches"),
+    driverStations: DEFAULT_DRIVER_STATIONS_FTC,
+    gamePieces: [],
+    aprilTags: []
+  }
+];

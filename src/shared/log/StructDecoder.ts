@@ -1,6 +1,13 @@
+// Copyright (c) 2021-2026 Littleton Robotics
+// http://github.com/Mechanical-Advantage
+//
+// Use of this source code is governed by a BSD
+// license that can be found in the LICENSE file
+// at the root directory of this project.
+
 /** Class to manage decoding WPILib structs.
  *
- * Specification: https://github.com/PeterJohnson/allwpilib/blob/protobuf/wpiutil/doc/struct.adoc
+ * Specification: https://github.com/wpilibsuite/allwpilib/blob/main/wpiutil/doc/struct.adoc
  */
 export default class StructDecoder {
   private schemaStrings: { [key: string]: string } = {};
@@ -30,7 +37,10 @@ export default class StructDecoder {
   }
 
   private compileSchema(name: string, schema: string): boolean {
-    let valueSchemaStrs: string[] = schema.split(";").filter((schemaStr) => schemaStr.length > 0);
+    let valueSchemaStrs: string[] = schema
+      .trim()
+      .split(";")
+      .filter((schemaStr) => schemaStr.length > 0);
     let valueSchemas: ValueSchema[] = [];
     for (let i = 0; i < valueSchemaStrs.length; i++) {
       let schemaStr = valueSchemaStrs[i];
@@ -168,34 +178,34 @@ export default class StructDecoder {
   }
 
   /** Converts struct-encoded data with a known schema to an object. */
-  decode(name: string, value: Uint8Array): { data: unknown; schemaTypes: { [key: string]: string } } {
+  decode(
+    name: string,
+    value: Uint8Array,
+    bitLength?: number
+  ): { data: unknown; schemaTypes: { [key: string]: string } } {
     if (!(name in this.schemas)) {
       throw new Error("Schema not defined");
     }
+    if (bitLength === undefined) bitLength = value.length * 8;
     let outputData: { [key: string]: unknown } = {};
     let outputSchemaTypes: { [key: string]: string } = {};
     let schema = this.schemas[name];
-    let boolArray = StructDecoder.toBoolArray(value);
     for (let i = 0; i < schema.valueSchemas.length; i++) {
       let valueSchema = schema.valueSchemas[i];
-      let valueBoolArray = boolArray.slice(valueSchema.bitRange[0], valueSchema.bitRange[1]);
+      const [valueArray, valueBitLength] = StructDecoder.sliceBits(value, valueSchema.bitRange);
       if (VALID_TYPE_STRINGS.includes(valueSchema.type)) {
         let type = valueSchema.type as ValueType;
         if (valueSchema.arrayLength === null) {
           // Normal type
-          outputData[valueSchema.name] = StructDecoder.decodeValue(
-            StructDecoder.toUint8Array(valueBoolArray),
-            type,
-            valueSchema.enum
-          );
+          outputData[valueSchema.name] = StructDecoder.decodeValue(valueArray, type, valueSchema.enum);
         } else {
           // Array type
           let value: unknown[] = [];
           let itemLength = (valueSchema.bitRange[1] - valueSchema.bitRange[0]) / valueSchema.arrayLength;
-          for (let position = 0; (position += itemLength); position < valueBoolArray.length) {
+          for (let position = 0; position < valueBitLength; position += itemLength) {
             value.push(
               StructDecoder.decodeValue(
-                StructDecoder.toUint8Array(valueBoolArray.slice(position, position + itemLength)),
+                StructDecoder.sliceBits(valueArray, [position, position + itemLength])[0],
                 type,
                 valueSchema.enum
               )
@@ -209,8 +219,11 @@ export default class StructDecoder {
         }
       } else {
         // Child struct
-        outputSchemaTypes[valueSchema.name] = valueSchema.type;
-        let child = this.decode(valueSchema.type, StructDecoder.toUint8Array(valueBoolArray));
+        let isArray = valueSchema.arrayLength !== null;
+        outputSchemaTypes[valueSchema.name] = valueSchema.type + (isArray ? "[]" : "");
+        let child = isArray
+          ? this.decodeArray(valueSchema.type, valueArray, valueSchema.arrayLength!)
+          : this.decode(valueSchema.type, valueArray, valueBitLength);
         outputData[valueSchema.name] = child.data;
         Object.keys(child.schemaTypes).forEach((field) => {
           outputSchemaTypes[valueSchema.name + "/" + field] = child.schemaTypes[field];
@@ -224,14 +237,18 @@ export default class StructDecoder {
   }
 
   /** Converts struct-encoded data with a known array schema to an object. */
-  decodeArray(name: string, value: Uint8Array): { data: unknown; schemaTypes: { [key: string]: string } } {
+  decodeArray(
+    name: string,
+    value: Uint8Array,
+    arrayLength?: number
+  ): { data: unknown; schemaTypes: { [key: string]: string } } {
     if (!(name in this.schemas)) {
       throw new Error("Schema not defined");
     }
     let outputData: unknown[] = [];
     let outputSchemaTypes: { [key: string]: string } = {};
     let schemaLength = this.schemas[name].length / 8;
-    let length = value.length / schemaLength;
+    let length = arrayLength === undefined ? value.length / schemaLength : arrayLength;
     for (let i = 0; i < length; i++) {
       let decodedData = this.decode(name, value.slice(i * schemaLength, (i + 1) * schemaLength));
       outputData.push(decodedData.data);
@@ -298,6 +315,14 @@ export default class StructDecoder {
       output = enumData[output];
     }
     return output;
+  }
+
+  private static sliceBits(input: Uint8Array, range: [number, number]): [Uint8Array, number] {
+    if (range[0] % 8 == 0 && range[1] % 8 === 0) {
+      return [input.slice(range[0] / 8, range[1] / 8), range[1] - range[0]];
+    } else {
+      return [this.toUint8Array(this.toBoolArray(input).slice(range[0], range[1])), range[1] - range[0]];
+    }
   }
 
   /** Convert a uint8 array to an array of booleans for each bit. */

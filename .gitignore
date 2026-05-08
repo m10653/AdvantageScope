@@ -1,13 +1,42 @@
 /node_modules
 /dist
 /bundles
+/lite/static/bundles
+/lite/static/bundledAssets
+/lite/ascope_assets
+/lite/ipk/build
+/lite/ipk/*.ipk
 /ffmpeg
 /src/licenses.json
 /ThirdPartyLicenses.txt
 /eng.traineddata.gz
-/docs
-/lite
+/runOwletDownload.js
 /owlet
+
+### Docs ###
+
+# Dependencies
+/docs/node_modules
+
+# Production
+/docs/build
+
+# Generated files
+/docs/.docusaurus
+/docs/.cache-loader
+
+# Misc
+/docs/.DS_Store
+/docs/.env.local
+/docs/.env.development.local
+/docs/.env.test.local
+/docs/.env.production.local
+
+/docs/npm-debug.log*
+/docs/yarn-debug.log*
+/docs/yarn-error.log*
+
+
 ### Linux ###
 *~
 
@@ -88,3 +117,9 @@ $RECYCLE.BIN/
 
 # IDE Specific Files
 .idea
+
+# Xcode
+build/*
+*.pbxuser
+*.mode1v3
+xcuserdata

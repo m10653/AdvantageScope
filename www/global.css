@@ -1,3 +1,12 @@
+/*
+  Copyright (c) 2021-2026 Littleton Robotics
+  http://github.com/Mechanical-Advantage
+
+  Use of this source code is governed by a BSD
+  license that can be found in the LICENSE file
+  at the root directory of this project.
+*/
+
 body {
   font-family:
     ui-sans-serif,
@@ -48,6 +57,17 @@ button > img {
 
   /* https://codepen.io/sosuke/pen/Pjoqqp */
   filter: invert(32%) sepia(0%) saturate(60%) hue-rotate(224deg) brightness(100%) contrast(95%);
+}
+
+button > object {
+  position: absolute;
+  max-height: 100%;
+  max-width: 100%;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%) scale(75%);
+
+  pointer-events: none;
 }
 
 button.blurred > img,

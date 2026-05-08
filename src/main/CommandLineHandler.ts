@@ -4,7 +4,6 @@ import fs from "fs";
 import Log from "../shared/log/Log";
 import WPILOGLoader from "../hub/dataSources/wpilog/WPILOGFileLoader";
 import LogExporter from "../hub/LogExporter";
-import { xgcd } from "mathjs";
 export default class CommandLineHandler {
   private parser: ArgumentParser;
   private subparsers: SubParser;

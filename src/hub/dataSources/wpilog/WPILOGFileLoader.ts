@@ -4,17 +4,14 @@ import { WPILOGDecoder } from "./WPILOGDecoder";
 import LoggableType from "../../../shared/log/LoggableType";
 import { PROTO_PREFIX, STRUCT_PREFIX } from "../../../shared/log/LogUtil";
 import CustomSchemas from "../schema/CustomSchemas";
-import { re } from "mathjs";
-abstract class LogLoader {
-  // abstract loadFile(file: File): Promise<Log>;
-}
+abstract class LogLoader {}
 
 export default class WPILOGLoader extends LogLoader {
   static loadFile(
     data: Uint8Array,
     progress: ((percent: number) => void) | undefined = undefined
   ): { serializedLog: any; log: Log } {
-    let log = new Log(false, false); // No timestamp set cache for efficiency
+    let log = new Log(false);
     let reader = new WPILOGDecoder(data);
     let totalBytes = data.byteLength;
     let entryIds: { [id: number]: string } = {};

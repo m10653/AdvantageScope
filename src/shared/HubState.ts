@@ -1,10 +1,15 @@
+// Copyright (c) 2021-2026 Littleton Robotics
+// http://github.com/Mechanical-Advantage
+//
+// Use of this source code is governed by a BSD
+// license that can be found in the LICENSE file
+// at the root directory of this project.
+
 import TabType from "./TabType";
-import LoggableType from "./log/LoggableType";
-import { UnitConversionPreset } from "./units";
 
 export interface HubState {
   sidebar: SidebarState;
-  tabs: TabGroupState;
+  tabs: TabsState;
 }
 
 export interface SidebarState {
@@ -12,83 +17,16 @@ export interface SidebarState {
   expanded: string[];
 }
 
-export interface TabGroupState {
+export interface TabsState {
   selected: number;
   tabs: TabState[];
 }
 
 export interface TabState {
   type: TabType;
-  title?: string;
-}
-
-export interface DocumentationState {
-  type: TabType.Documentation;
-  path: string;
-}
-
-export interface LineGraphState {
-  type: TabType.LineGraph;
-  legendHeight: number;
-  legends: {
-    left: {
-      lockedRange: [number, number] | null;
-      unitConversion: UnitConversionPreset;
-      fields: {
-        key: string;
-        color: string;
-        show: boolean;
-      }[];
-    };
-    discrete: {
-      fields: {
-        key: string;
-        color: string;
-        show: boolean;
-      }[];
-    };
-    right: {
-      lockedRange: [number, number] | null;
-      unitConversion: UnitConversionPreset;
-      fields: {
-        key: string;
-        color: string;
-        show: boolean;
-      }[];
-    };
-  };
-}
-
-export interface TableState {
-  type: TabType.Table;
-  fields: string[];
-}
-
-export interface ConsoleState {
-  type: TabType.Console;
-  field: string | null;
-}
-
-export interface StatisticsState {
-  type: TabType.Statistics;
-  fields: (string | null)[];
-  selectionType: string;
-  selectionRangeMin: number;
-  selectionRangeMax: number;
-  measurementType: string;
-  measurementSampling: string;
-  measurementSamplingPeriod: number;
-  histogramMin: number;
-  histogramMax: number;
-  histogramStep: number;
-}
-
-export interface TimelineVisualizerState {
-  type: TabType.Odometry | TabType.ThreeDimension | TabType.Video | TabType.Points | TabType.Joysticks;
-  uuid: string;
-  fields: ({ key: string; sourceTypeIndex: number; sourceType: LoggableType | string } | null)[];
-  listFields: { type: string; key: string; sourceTypeIndex: number; sourceType: LoggableType | string }[][];
-  options: { [id: string]: any };
-  configHidden: boolean;
-  visualizer: any;
+  title: string;
+  controller: unknown;
+  controllerUUID: string;
+  renderer: unknown;
+  controlsHeight: number;
 }

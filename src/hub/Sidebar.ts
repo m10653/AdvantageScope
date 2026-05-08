@@ -1,13 +1,22 @@
+// Copyright (c) 2021-2026 Littleton Robotics
+// http://github.com/Mechanical-Advantage
+//
+// Use of this source code is governed by a BSD
+// license that can be found in the LICENSE file
+// at the root directory of this project.
+
+import { Distribution, DISTRIBUTION } from "../shared/buildConstants";
 import { SidebarState } from "../shared/HubState";
 import LogFieldTree from "../shared/log/LogFieldTree";
 import LoggableType from "../shared/log/LoggableType";
 import { getOrDefault, searchFields, TYPE_KEY } from "../shared/log/LogUtil";
-import { arraysEqual, setsEqual } from "../shared/util";
-import { ZEBRA_LOG_KEY } from "./dataSources/LoadZebra";
+import { SelectionMode } from "../shared/Selection";
+import { arraysEqual, htmlEncode, setsEqual } from "../shared/util";
 import CustomSchemas from "./dataSources/schema/CustomSchemas";
-import { SelectionMode } from "./Selection";
 
 export default class Sidebar {
+  private DEFAULT_SIDEBAR_WIDTH = 300;
+
   private SIDEBAR = document.getElementsByClassName("side-bar")[0] as HTMLElement;
   private SIDEBAR_HANDLE = document.getElementsByClassName("side-bar-handle")[0] as HTMLElement;
   private SIDEBAR_SHADOW = document.getElementsByClassName("side-bar-shadow")[0] as HTMLElement;
@@ -28,7 +37,10 @@ export default class Sidebar {
     "ReplayOutputs",
     "SystemStats",
     "PowerDistribution",
+    "Tuning",
+    "NetworkInputs",
     "DashboardInputs",
+    "RadioStatus",
     "Timestamp",
     "AdvantageKit",
     "DS",
@@ -37,16 +49,16 @@ export default class Sidebar {
     "messages",
     "systemTime",
     "DSLog",
-    "DSEvents",
-    ZEBRA_LOG_KEY
+    "DSEvents"
   ];
   private HIDDEN_KEYS = [".schema", "Metadata", "RealMetadata", "ReplayMetadata"];
   private INDENT_SIZE_PX = 20;
   private FIELD_DRAG_THRESHOLD_PX = 3;
   private VALUE_WIDTH_MARGIN_PX = 12;
 
+  private getFilenames: () => string[];
   private sidebarHandleActive = false;
-  private sidebarWidth = 300;
+  private sidebarWidth = this.DEFAULT_SIDEBAR_WIDTH;
   private fieldCount = 0;
   private isTuningMode = false;
   private lastFieldKeys: string[] = [];
@@ -65,25 +77,51 @@ export default class Sidebar {
   private tuningModePublishCallbacks: (() => void)[] = [];
   private tuningValueCache: { [key: string]: string } = {};
   private updateMetadataCallbacks: (() => void)[] = [];
+  private updateLoadingCallbacks: ((loadingFields: Set<string>) => void)[] = [];
 
-  constructor() {
+  constructor(getFilenames: () => string[]) {
+    this.getFilenames = getFilenames;
+
     // Set up handle for resizing
+    let enableIframes = (enabled: boolean) => {
+      Array.from(document.getElementsByTagName("iframe")).forEach((iframe) => {
+        iframe.style.pointerEvents = enabled ? "initial" : "none";
+      });
+    };
     this.SIDEBAR_HANDLE.addEventListener("mousedown", () => {
       this.sidebarHandleActive = true;
       document.body.style.cursor = "col-resize";
+      enableIframes(false);
     });
     window.addEventListener("mouseup", () => {
       this.sidebarHandleActive = false;
       document.body.style.cursor = "initial";
+      enableIframes(true);
     });
     window.addEventListener("mousemove", (event) => {
       if (this.sidebarHandleActive) {
         let width = event.clientX;
         if (width > 500) width = 500;
         if (width >= 80 && width < 160) width = 160;
-        if (width < 80) width = 0;
+        if (width < 80) {
+          if (this.sidebarWidth > 0) {
+            width = 0;
+          } else {
+            width = this.sidebarWidth;
+          }
+        }
         this.sidebarWidth = width;
         this.updateWidth();
+      }
+    });
+    let lastClick = 0;
+    this.SIDEBAR_HANDLE.addEventListener("click", () => {
+      let now = new Date().getTime();
+      if (now - lastClick < 400) {
+        this.toggleVisible();
+        lastClick = 0;
+      } else {
+        lastClick = now;
       }
     });
     this.updateWidth();
@@ -91,6 +129,35 @@ export default class Sidebar {
     // Set up shadow when scrolling
     this.SIDEBAR.addEventListener("scroll", () => {
       this.SIDEBAR_SHADOW.style.opacity = this.SIDEBAR.scrollTop === 0 ? "0" : "1";
+    });
+
+    // Menu bar
+    let menuBar = document.getElementsByClassName("title-bar-menu")[0] as HTMLElement;
+    Array.from(menuBar.getElementsByTagName("button")).forEach((button, index) => {
+      let active = false;
+      button.addEventListener("click", () => {
+        if (active && DISTRIBUTION !== Distribution.Lite) {
+          active = false;
+          window.sendMainMessage("close-app-menu", {
+            index: index
+          });
+        } else {
+          active = true;
+          let rect = button.getBoundingClientRect();
+          window.sendMainMessage("open-app-menu", {
+            index: index,
+            rect: {
+              x: rect.x,
+              y: rect.y,
+              width: rect.width,
+              height: rect.height
+            }
+          });
+        }
+      });
+      button.addEventListener("mouseleave", () => {
+        active = false;
+      });
     });
 
     // Search controls
@@ -187,6 +254,16 @@ export default class Sidebar {
     if (!expandedEqual) this.refresh(true);
   }
 
+  /** Toggles the visibility of the sidebar. */
+  toggleVisible() {
+    if (this.sidebarWidth === 0) {
+      this.sidebarWidth = this.DEFAULT_SIDEBAR_WIDTH;
+    } else {
+      this.sidebarWidth *= -1;
+    }
+    this.updateWidth();
+  }
+
   /** Updates the hovering effect on the search results. */
   private updateSearchHovered(scroll: boolean) {
     Array.from(this.SEARCH_RESULTS.children).forEach((element, index) => {
@@ -248,8 +325,9 @@ export default class Sidebar {
 
   /** Updates the displayed width based on the current state. */
   private updateWidth() {
-    document.documentElement.style.setProperty("--side-bar-width", this.sidebarWidth.toString() + "px");
-    document.documentElement.style.setProperty("--show-side-bar", this.sidebarWidth > 0 ? "1" : "0");
+    let appliedWidth = Math.max(this.sidebarWidth, 0);
+    document.documentElement.style.setProperty("--side-bar-width", appliedWidth.toString() + "px");
+    document.documentElement.style.setProperty("--show-side-bar", appliedWidth === 0 ? "0" : "1");
   }
 
   /** Updates the title with the duration and field count. */
@@ -306,7 +384,7 @@ export default class Sidebar {
   /** Show or hide tuning button based on tuner availability. */
   private updateTuningButton() {
     let tuningButtonVisible = !this.TUNING_BUTTON.hidden;
-    let tunerAvailable = window.tuner !== null;
+    let tunerAvailable = window.tuner !== null && window.tuner.hasTunableFields();
     if (tuningButtonVisible !== tunerAvailable) {
       this.TUNING_BUTTON.hidden = !tunerAvailable;
       document.documentElement.style.setProperty("--show-tuning-button", tunerAvailable ? "1" : "0");
@@ -373,6 +451,7 @@ export default class Sidebar {
       // Update type warnings and metadata
       this.updateTypeWarningCallbacks.forEach((callback) => callback());
       this.updateMetadataCallbacks.forEach((callback) => callback());
+      this.updateLoadingCallbacks.forEach((callback) => callback(window.getLoadingFields()));
     }
   }
 
@@ -480,8 +559,9 @@ export default class Sidebar {
       label.appendChild(labelSpan);
       labelSpan.innerText = title;
     }
-    label.style.fontStyle = field.fullKey === null ? "normal" : "italic";
-    label.style.cursor = field.fullKey === null ? "auto" : "grab";
+    if (field.fullKey !== null) {
+      label.classList.add("full-key");
+    }
     if (field.fullKey) {
       {
         let typeWarningSpan = document.createElement("span");
@@ -513,9 +593,34 @@ export default class Sidebar {
         let typeLabel = document.createElement("span");
         typeLabel.classList.add("field-item-type-label");
         label.appendChild(typeLabel);
-        typeLabel.innerHTML = " &ndash; " + structuredType;
+        typeLabel.innerHTML = " &ndash; " + htmlEncode(structuredType);
+      }
+    } else {
+      if (title.startsWith(this.MERGED_KEY) && indent === 0) {
+        let mergeIndex = Number(title.slice(this.MERGED_KEY.length));
+        let mergedFilenames = this.getFilenames();
+        if (mergeIndex < mergedFilenames.length) {
+          let filename = mergedFilenames[mergeIndex];
+
+          let typeLabel = document.createElement("span");
+          typeLabel.classList.add("field-item-type-label");
+          label.appendChild(typeLabel);
+          typeLabel.innerHTML = " &ndash; " + htmlEncode(filename);
+        }
       }
     }
+
+    // Right-click context menu for copying field paths
+    let mouseDownInfo: [number, number, number, number] | null = null;
+    label.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      mouseDownInfo = null;
+      window.sendMainMessage("ask-open-sidebar-context-menu", {
+        title: title,
+        fullTitle: fullTitle,
+        position: [event.clientX, event.clientY]
+      });
+    });
 
     // Full key fields
     if (field.fullKey !== null) {
@@ -523,8 +628,16 @@ export default class Sidebar {
       {
         let dragEvent = (x: number, y: number, offsetX: number, offsetY: number) => {
           let isGroup = this.selectGroup.includes(field.fullKey !== null ? field.fullKey : "");
-          this.DRAG_ITEM.innerText = title + (isGroup ? "..." : "");
-          this.DRAG_ITEM.style.fontWeight = isGroup ? "bolder" : "initial";
+          while (this.DRAG_ITEM.firstChild) {
+            this.DRAG_ITEM.removeChild(this.DRAG_ITEM.firstChild);
+          }
+
+          let text = document.createElement("span");
+          text.classList.add("field-text");
+          this.DRAG_ITEM.appendChild(text);
+          text.innerText = title + (isGroup ? "\u2026" : "");
+          text.style.fontWeight = isGroup ? "bolder" : "initial";
+
           window.startDrag(x, y, offsetX, offsetY, {
             fields: isGroup ? this.selectGroup : [field.fullKey],
             children: isGroup
@@ -538,7 +651,6 @@ export default class Sidebar {
             this.selectGroupClearCallbacks.forEach((callback) => callback());
           }
         };
-        let mouseDownInfo: [number, number, number, number] | null = null;
         label.addEventListener("mousedown", (event) => {
           mouseDownInfo = [event.clientX, event.clientY, event.offsetX, event.offsetY];
         });
@@ -646,7 +758,7 @@ export default class Sidebar {
 
         // Tuning mode controls
         svg.addEventListener("click", () => {
-          if (!this.isTuningMode) return;
+          if (!svg.classList.contains("tunable")) return;
           let oldValue = circle.getAttributeNS(null, "fill") !== "red";
           let value = !oldValue;
           let liveTime = window.selection.getCurrentLiveTime();
@@ -818,6 +930,20 @@ export default class Sidebar {
       };
       this.updateMetadataCallbacks.push(updateMetadata);
       updateMetadata();
+
+      // Loading callback
+      let lastLoading = false;
+      let updateLoading = (loadingFields: Set<string>) => {
+        let isLoading = loadingFields.has(field.fullKey!);
+        if (isLoading && !lastLoading) {
+          label.classList.add("loading");
+        } else if (!isLoading && lastLoading) {
+          label.classList.remove("loading");
+        }
+        lastLoading = isLoading;
+      };
+      this.updateLoadingCallbacks.push(updateLoading);
+      updateLoading(window.getLoadingFields());
     }
 
     // Add children
@@ -910,7 +1036,11 @@ export default class Sidebar {
 
   /** Returns the set of field keys that are currently visible. */
   getActiveFields(): Set<string> {
-    this.activeFieldCallbacks.forEach((callback) => callback());
-    return this.activeFields;
+    if (this.sidebarWidth > 0) {
+      this.activeFieldCallbacks.forEach((callback) => callback());
+      return this.activeFields;
+    } else {
+      return new Set();
+    }
   }
 }

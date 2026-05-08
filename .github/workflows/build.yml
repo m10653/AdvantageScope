@@ -11,44 +11,197 @@ on:
     types: [published]
 
 jobs:
-  compile:
-    name: Check & Compile
+  check-formatting:
+    name: Check Formatting
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: "18.x"
+          node-version: "20.x"
           cache: "npm"
       - name: Install Node.js dependencies
         run: npm ci
         env:
-          ASCOPE_NO_FFMPEG: true
+          YOUTUBE_DL_SKIP_DOWNLOAD: "true"
       - name: Check formatting
         run: npm run check-format
-      - name: Compile bundles (FRC 6328)
+
+  build-docs:
+    name: Build Docs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+          cache: "npm"
+      - name: Install Node.js dependencies
+        run: npm ci
+        env:
+          YOUTUBE_DL_SKIP_DOWNLOAD: "true"
+      - name: Build docs
+        run: npm run docs:build
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs
+          path: docs/build/
+
+  compile-frc6328:
+    name: Compile for FRC 6328
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+          cache: "npm"
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 4.0.12
+      - name: Install Node.js dependencies
+        run: npm ci
+        env:
+          YOUTUBE_DL_SKIP_DOWNLOAD: "true"
+      - name: Compile WebAssembly
+        run: npm run wasm:compile
+      - name: Compile bundles
         run: npm run compile
-      - name: Upload bundles (FRC 6328)
-        uses: actions/upload-artifact@v3
+      - name: Upload bundles
+        uses: actions/upload-artifact@v4
         with:
           name: bundles
-          path: bundles/*.js
-      - name: Compile bundles (WPILib)
+          path: |
+            bundles/*.js
+            bundles/*.wasm
+
+  compile-wpilib:
+    name: Compile for WPILib
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+          cache: "npm"
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 4.0.12
+      - name: Install Node.js dependencies
+        run: npm ci
+        env:
+          YOUTUBE_DL_SKIP_DOWNLOAD: "true"
+      - name: Compile WebAssembly
+        run: npm run wasm:compile
+      - name: Compile bundles
         run: npm run compile
         env:
-          ASCOPE_DISTRIBUTOR: WPILIB
-      - name: Upload bundles (WPILib)
-        uses: actions/upload-artifact@v3
+          ASCOPE_DISTRIBUTION: WPILIB
+      - name: Upload bundles
+        uses: actions/upload-artifact@v4
         with:
           name: bundles-wpilib
-          path: bundles/*.js
+          path: |
+            bundles/*.js
+            bundles/*.wasm
+
+  compile-lite:
+    name: Compile for Lite
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+          cache: "npm"
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 4.0.12
+      - name: Install Node.js dependencies
+        run: npm ci
+        env:
+          YOUTUBE_DL_SKIP_DOWNLOAD: "true"
+      - name: Compile WebAssembly
+        run: npm run wasm:compile
+      - name: Compile bundles
+        run: npm run compile
+        env:
+          ASCOPE_DISTRIBUTION: LITE
+      - name: Build documentation
+        run: npm run docs:build-embed
+        env:
+          ASCOPE_DISTRIBUTION: LITE
+      - name: Prepare artifact (desktop)
+        run: |
+          mkdir advantagescopelite-desktop
+          cp lite/lite_server.py advantagescopelite-desktop/lite_server.py
+          cp -rL lite/static advantagescopelite-desktop/static
+          zip -r advantagescopelite-desktop.zip advantagescopelite-desktop/
+      - name: Upload development artifact (desktop)
+        uses: actions/upload-artifact@v4
+        with:
+          name: advantagescopelite-desktop
+          path: advantagescopelite-desktop/
+      - name: Build IPK (Systemcore)
+        run: cd lite/ipk && ./build.sh
+      - name: Upload development artifact (Systemcore)
+        uses: actions/upload-artifact@v4
+        with:
+          name: advantagescopelite-systemcore
+          path: lite/ipk/advantagescope-lite_*.ipk
+
+  build-ios:
+    name: Build for iOS
+    runs-on: macos-26
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install Metal toolchain
+        run: xcodebuild -downloadComponent MetalToolchain
+      - name: Download iOS simulator
+        run: |
+          n=0
+          until [ "$n" -ge 5 ]
+          do
+            echo "Attempting download (Try $((n+1)))..."
+            xcodebuild -downloadPlatform iOS && break
+            n=$((n+1))
+            echo "Download failed. Sleeping 10 seconds before retry..."
+            sleep 10
+          done
+
+          if [ "$n" -ge 5 ]; then
+            echo "Failed to download iOS simulator after 5 attempts."
+            exit 1
+          fi
+      - name: Build AdvantageScopeXR
+        run: xcodebuild -project xr/AdvantageScopeXR.xcodeproj -scheme AdvantageScopeXR -sdk iphonesimulator build
+      - name: Build AdvantageScopeXRClip
+        run: xcodebuild -project xr/AdvantageScopeXR.xcodeproj -scheme AdvantageScopeXRClip -sdk iphonesimulator build
 
   build-win:
     name: Build for Windows (${{ matrix.arch }})
-    needs: compile
+    needs: compile-frc6328
     runs-on: windows-latest
 
     strategy:
@@ -58,19 +211,23 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: "18.x"
+          node-version: "20.x"
           cache: "npm"
       - name: Install Node.js dependencies
         run: npm ci
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Download bundles
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: bundles
           path: bundles
+      - name: Build documentation
+        run: npm run docs:build-embed
       - name: Build app
         run: npx electron-builder build --${{ matrix.arch }} --publish never
         env:
@@ -80,7 +237,7 @@ jobs:
           Move-Item -Path "dist\AdvantageScope*.exe" -Destination "advantagescope-win-${{ matrix.arch }}-dev.exe"
       - name: Upload development artifact
         if: github.event_name != 'release'
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: advantagescope-win-${{ matrix.arch }}-dev.exe
           path: advantagescope-win-${{ matrix.arch }}-dev.exe
@@ -103,7 +260,7 @@ jobs:
 
   build-mac:
     name: Build for macOS (${{ matrix.arch }})
-    needs: compile
+    needs: compile-frc6328
     runs-on: macos-latest
 
     strategy:
@@ -113,14 +270,16 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: "18.x"
+          node-version: "20.x"
           cache: "npm"
       - name: Install Node.js dependencies
         run: npm ci
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Load macOS certificate
         if: github.event_name != 'pull_request'
         run: |
@@ -133,10 +292,12 @@ jobs:
           echo "APPLE_ID_PWD=${{ secrets.MACOS_APPLE_ID_PWD }}" >> $GITHUB_ENV
           echo "APPLE_ID_TEAM=${{ secrets.MACOS_APPLE_ID_TEAM }}" >> $GITHUB_ENV
       - name: Download bundles
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: bundles
           path: bundles
+      - name: Build documentation
+        run: npm run docs:build-embed
       - name: Build app
         run: npx electron-builder build --${{ matrix.arch }} --publish never
         env:
@@ -146,7 +307,7 @@ jobs:
           mv dist/AdvantageScope-*.dmg advantagescope-mac-${{ matrix.arch }}-dev.dmg
       - name: Upload development artifact
         if: github.event_name != 'release'
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: advantagescope-mac-${{ matrix.arch }}-dev.dmg
           path: advantagescope-mac-${{ matrix.arch }}-dev.dmg
@@ -169,7 +330,7 @@ jobs:
 
   build-linux:
     name: Build for Linux/${{ matrix.format }} (${{ matrix.arch.electronArch }})
-    needs: compile
+    needs: compile-frc6328
     runs-on: ubuntu-latest
 
     strategy:
@@ -188,17 +349,19 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: "18.x"
+          node-version: "20.x"
           cache: "npm"
       - name: Install Node.js dependencies
         run: npm ci
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Install Linux packages
         run: |
-          sudo apt-get update; sudo apt-get install --no-install-recommends -y libarchive-tools snapcraft
+          sudo apt-get update; sudo apt-get install --no-install-recommends -y libarchive-tools snapd
       - name: Install flatpak packages
         if: matrix.format == 'flatpak'
         run: |
@@ -208,12 +371,14 @@ jobs:
           sudo flatpak install flathub org.freedesktop.Sdk/${{ matrix.arch.flatpakArch }}/22.08 --assumeyes
           sudo flatpak install flathub org.electronjs.Electron2.BaseApp/${{ matrix.arch.flatpakArch }}/22.08 --assumeyes
       - name: Download bundles
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: bundles
           path: bundles
+      - name: Build documentation
+        run: npm run docs:build-embed
       - name: Build app
-        run: npx electron-builder build --${{ matrix.arch.electronArch }} -l ${{ matrix.format }} --publish never
+        run: npx electron-builder build -c.electronVersion=37.10.3 --${{ matrix.arch.electronArch }} -l ${{ matrix.format }} --publish never
         env:
           NODE_OPTIONS: --max-old-space-size=4096
       - name: Prepare artifact
@@ -221,7 +386,7 @@ jobs:
           mv dist/*.${{ matrix.format }} advantagescope-linux-${{ matrix.arch.electronArch }}-dev.${{ matrix.format }}
       - name: Upload development artifact
         if: github.event_name != 'release'
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: advantagescope-linux-${{ matrix.arch.electronArch }}-dev.${{ matrix.format }}
           path: advantagescope-linux-${{ matrix.arch.electronArch }}-dev.${{ matrix.format }}
@@ -244,7 +409,7 @@ jobs:
 
   build-wpilib-win:
     name: "WPILib: Build for Windows (${{ matrix.arch }})"
-    needs: compile
+    needs: compile-wpilib
     runs-on: windows-latest
 
     strategy:
@@ -254,23 +419,27 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: "18.x"
+          node-version: "20.x"
           cache: "npm"
       - name: Install Node.js dependencies
         run: npm ci
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Download bundles
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: bundles-wpilib
           path: bundles
+      - name: Build documentation
+        run: npm run docs:build-embed
       - name: Build app
         run: npx electron-builder build --publish never --${{ matrix.arch }} -w dir
         env:
-          ASCOPE_DISTRIBUTOR: WPILIB
+          ASCOPE_DISTRIBUTION: WPILIB
           NODE_OPTIONS: --max-old-space-size=4096
       - name: Prepare artifact
         run: |
@@ -280,7 +449,7 @@ jobs:
           Compress-Archive -Path "dist\win*\*" -DestinationPath "advantagescope-wpilib-win-${{ matrix.arch }}.zip"
       - name: Upload development artifact
         if: github.event_name != 'release'
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: advantagescope-wpilib-win-${{ matrix.arch }}.zip
           path: advantagescope-wpilib-win-${{ matrix.arch }}.zip
@@ -303,7 +472,7 @@ jobs:
 
   build-wpilib-mac:
     name: "WPILib: Build for macOS (${{ matrix.arch }})"
-    needs: compile
+    needs: compile-wpilib
     runs-on: macos-latest
 
     strategy:
@@ -313,14 +482,16 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: "18.x"
+          node-version: "20.x"
           cache: "npm"
       - name: Install Node.js dependencies
         run: npm ci
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Load macOS certificate
         if: github.event_name != 'pull_request'
         run: |
@@ -333,14 +504,16 @@ jobs:
           echo "APPLE_ID_PWD=${{ secrets.MACOS_APPLE_ID_PWD }}" >> $GITHUB_ENV
           echo "APPLE_ID_TEAM=${{ secrets.MACOS_APPLE_ID_TEAM }}" >> $GITHUB_ENV
       - name: Download bundles
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: bundles-wpilib
           path: bundles
+      - name: Build documentation
+        run: npm run docs:build-embed
       - name: Build app
         run: npx electron-builder build --publish never --${{ matrix.arch }} -m dir
         env:
-          ASCOPE_DISTRIBUTOR: WPILIB
+          ASCOPE_DISTRIBUTION: WPILIB
           NODE_OPTIONS: --max-old-space-size=4096
       - name: Prepare artifact
         run: |
@@ -352,7 +525,7 @@ jobs:
           tar -zcvf advantagescope-wpilib-mac-${{ matrix.arch }}.tar.gz "AdvantageScope (WPILib).app"
       - name: Upload development artifact
         if: github.event_name != 'release'
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: advantagescope-wpilib-mac-${{ matrix.arch }}.tar.gz
           path: advantagescope-wpilib-mac-${{ matrix.arch }}.tar.gz
@@ -375,7 +548,7 @@ jobs:
 
   build-wpilib-linux:
     name: "WPILib: Build for Linux (${{ matrix.arch }})"
-    needs: compile
+    needs: compile-wpilib
     runs-on: ubuntu-latest
 
     strategy:
@@ -385,31 +558,37 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: "18.x"
+          node-version: "20.x"
           cache: "npm"
       - name: Install Node.js dependencies
         run: npm ci
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Download bundles
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: bundles-wpilib
           path: bundles
+      - name: Build documentation
+        run: npm run docs:build-embed
       - name: Build app
-        run: npx electron-builder build --publish never --${{ matrix.arch }} -l AppImage
+        run: npx electron-builder build -c.electronVersion=37.10.3 --publish never --${{ matrix.arch }} -l dir
         env:
-          ASCOPE_DISTRIBUTOR: WPILIB
+          ASCOPE_DISTRIBUTION: WPILIB
           NODE_OPTIONS: --max-old-space-size=4096
       - name: Prepare artifact
         run: |
-          mv dist/AdvantageScope*.AppImage "AdvantageScope (WPILib).AppImage"
-          zip advantagescope-wpilib-linux-${{ matrix.arch }}.zip "AdvantageScope (WPILib).AppImage"
+          cd dist/linux*
+          mv advantagescope advantagescope-wpilib
+          zip -r ../../advantagescope-wpilib-linux-${{ matrix.arch }}.zip ./*
+          cd ../..
       - name: Upload development artifact
         if: github.event_name != 'release'
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: advantagescope-wpilib-linux-${{ matrix.arch }}.zip
           path: advantagescope-wpilib-linux-${{ matrix.arch }}.zip
@@ -437,11 +616,22 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
       - name: Get release info
         id: get_release_info
         uses: kaliber5/action-get-release@v1
         with:
           token: ${{ github.token }}
+      - name: Publish AppArmor profile
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          upload_url: ${{ steps.get_release_info.outputs.upload_url }}
+          asset_path: advantagescope.AppArmor
+          asset_name: advantagescope.AppArmor
+          asset_content_type: "text/plain"
       - name: Edit release
         uses: irongut/EditRelease@v1.2.0
         with:
@@ -450,8 +640,3 @@ jobs:
           prerelease: false
           replacebody: false
           body: '<table><tr><th colspan="4">Common Downloads</th></tr><tr><td colspan="4">🪟 <a href="https://github.com/Mechanical-Advantage/AdvantageScope/releases/download/${{ steps.get_release_info.outputs.tag_name }}/advantagescope-win-x64-${{ steps.get_release_info.outputs.tag_name }}.exe">Windows x64</a></td></tr><tr><td colspan="4">🍎 <a href="https://github.com/Mechanical-Advantage/AdvantageScope/releases/download/${{ steps.get_release_info.outputs.tag_name }}/advantagescope-mac-arm64-${{ steps.get_release_info.outputs.tag_name }}.dmg">macOS Apple Silicon</a></td></tr><tr><td colspan="4">🍎 <a href="https://github.com/Mechanical-Advantage/AdvantageScope/releases/download/${{ steps.get_release_info.outputs.tag_name }}/advantagescope-mac-x64-${{ steps.get_release_info.outputs.tag_name }}.dmg">macOS Intel</a></td></tr><tr><td colspan="4">🐧 <a href="https://github.com/Mechanical-Advantage/AdvantageScope/releases/download/${{ steps.get_release_info.outputs.tag_name }}/advantagescope-linux-x64-${{ steps.get_release_info.outputs.tag_name }}.deb">Linux x86 Deb</a></td></tr><tr><th colspan="4">All Downloads</th></tr><tr><td>Windows</td><td><a href="https://github.com/Mechanical-Advantage/AdvantageScope/releases/download/${{ steps.get_release_info.outputs.tag_name }}/advantagescope-win-x64-${{ steps.get_release_info.outputs.tag_name }}.exe">x64</a></td><td><a href="https://github.com/Mechanical-Advantage/AdvantageScope/releases/download/${{ steps.get_release_info.outputs.tag_name }}/advantagescope-win-arm64-${{ steps.get_release_info.outputs.tag_name }}.exe">arm64</a></td><td></td></tr><tr><td>macOS</td><td><a href="https://github.com/Mechanical-Advantage/AdvantageScope/releases/download/${{ steps.get_release_info.outputs.tag_name }}/advantagescope-mac-x64-${{ steps.get_release_info.outputs.tag_name }}.dmg">x64</a></td><td><a href="https://github.com/Mechanical-Advantage/AdvantageScope/releases/download/${{ steps.get_release_info.outputs.tag_name }}/advantagescope-mac-arm64-${{ steps.get_release_info.outputs.tag_name }}.dmg">arm64</a></td><td></td></tr><tr><td>Linux/deb</td><td><a href="https://github.com/Mechanical-Advantage/AdvantageScope/releases/download/${{ steps.get_release_info.outputs.tag_name }}/advantagescope-linux-x64-${{ steps.get_release_info.outputs.tag_name }}.deb">x64</a></td><td><a href="https://github.com/Mechanical-Advantage/AdvantageScope/releases/download/${{ steps.get_release_info.outputs.tag_name }}/advantagescope-linux-arm64-${{ steps.get_release_info.outputs.tag_name }}.deb">arm64</a></td><td><a href="https://github.com/Mechanical-Advantage/AdvantageScope/releases/download/${{ steps.get_release_info.outputs.tag_name }}/advantagescope-linux-armv7l-${{ steps.get_release_info.outputs.tag_name }}.deb">arm32</a></td></tr><tr><td>Linux/rpm</td><td><a href="https://github.com/Mechanical-Advantage/AdvantageScope/releases/download/${{ steps.get_release_info.outputs.tag_name }}/advantagescope-linux-x64-${{ steps.get_release_info.outputs.tag_name }}.rpm">x64</a></td><td><a href="https://github.com/Mechanical-Advantage/AdvantageScope/releases/download/${{ steps.get_release_info.outputs.tag_name }}/advantagescope-linux-arm64-${{ steps.get_release_info.outputs.tag_name }}.rpm">arm64</a></td><td><a href="https://github.com/Mechanical-Advantage/AdvantageScope/releases/download/${{ steps.get_release_info.outputs.tag_name }}/advantagescope-linux-armv7l-${{ steps.get_release_info.outputs.tag_name }}.rpm">arm32</a></td></tr><tr><td>Linux/pacman</td><td><a href="https://github.com/Mechanical-Advantage/AdvantageScope/releases/download/${{ steps.get_release_info.outputs.tag_name }}/advantagescope-linux-x64-${{ steps.get_release_info.outputs.tag_name }}.pacman">x64</a></td><td><a href="https://github.com/Mechanical-Advantage/AdvantageScope/releases/download/${{ steps.get_release_info.outputs.tag_name }}/advantagescope-linux-arm64-${{ steps.get_release_info.outputs.tag_name }}.pacman">arm64</a></td><td><a href="https://github.com/Mechanical-Advantage/AdvantageScope/releases/download/${{ steps.get_release_info.outputs.tag_name }}/advantagescope-linux-armv7l-${{ steps.get_release_info.outputs.tag_name }}.pacman">arm32</a></td></tr><tr><td>Linux/AppImage</td><td><a href="https://github.com/Mechanical-Advantage/AdvantageScope/releases/download/${{ steps.get_release_info.outputs.tag_name }}/advantagescope-linux-x64-${{ steps.get_release_info.outputs.tag_name }}.AppImage">x64</a></td><td><a href="https://github.com/Mechanical-Advantage/AdvantageScope/releases/download/${{ steps.get_release_info.outputs.tag_name }}/advantagescope-linux-arm64-${{ steps.get_release_info.outputs.tag_name }}.AppImage">arm64</a></td><td><a href="https://github.com/Mechanical-Advantage/AdvantageScope/releases/download/${{ steps.get_release_info.outputs.tag_name }}/advantagescope-linux-armv7l-${{ steps.get_release_info.outputs.tag_name }}.AppImage">arm32</a></td></tr><tr><td>Linux/snap</td><td><a href="https://github.com/Mechanical-Advantage/AdvantageScope/releases/download/${{ steps.get_release_info.outputs.tag_name }}/advantagescope-linux-x64-${{ steps.get_release_info.outputs.tag_name }}.snap">x64</a></td><td></td><td><a href="https://github.com/Mechanical-Advantage/AdvantageScope/releases/download/${{ steps.get_release_info.outputs.tag_name }}/advantagescope-linux-armv7l-${{ steps.get_release_info.outputs.tag_name }}.snap">arm32</a></td></tr><tr><td>Linux/flatpak</td><td><a href="https://github.com/Mechanical-Advantage/AdvantageScope/releases/download/${{ steps.get_release_info.outputs.tag_name }}/advantagescope-linux-x64-${{ steps.get_release_info.outputs.tag_name }}.flatpak">x64</a></td><td><a href="https://github.com/Mechanical-Advantage/AdvantageScope/releases/download/${{ steps.get_release_info.outputs.tag_name }}/advantagescope-linux-arm64-${{ steps.get_release_info.outputs.tag_name }}.flatpak">arm64</a></td><td></td></tr></table>'
-      - name: Mark as latest
-        run: |
-          gh api --method PATCH -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" /repos/Mechanical-Advantage/AdvantageScope/releases/${{ github.event.release.id }} -f make_latest=true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

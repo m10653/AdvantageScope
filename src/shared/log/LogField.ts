@@ -1,4 +1,10 @@
-import { re } from "mathjs";
+// Copyright (c) 2021-2026 Littleton Robotics
+// http://github.com/Mechanical-Advantage
+//
+// Use of this source code is governed by a BSD
+// license that can be found in the LICENSE file
+// at the root directory of this project.
+
 import LoggableType from "./LoggableType";
 import { logValuesEqual } from "./LogUtil";
 import {
@@ -11,10 +17,7 @@ import {
   LogValueSetString,
   LogValueSetStringArray
 } from "./LogValueSets";
-type LogRecord = {
-  timestamp: number;
-  value: any;
-};
+
 /** A full log field that contains data. */
 export default class LogField {
   private type: LoggableType;
@@ -23,13 +26,14 @@ export default class LogField {
   public wpilibType: string | null = null; // Original type from WPILOG & NT4
   public metadataString = "";
   public typeWarning = false; // Flag that there was an attempt to write a conflicting type
-  private enableLiveSorting: boolean;
+
   // Toggles when first value is removed, useful for creating striping effects that persist as data is updated
   private stripingReference = false;
-  private rawData: LogRecord[] = [];
-  constructor(type: LoggableType, enableLiveSorting = true) {
+
+  private getRangeCache: { [id: string]: number } = {};
+
+  constructor(type: LoggableType) {
     this.type = type;
-    this.enableLiveSorting = enableLiveSorting;
   }
 
   /** Returns the constant field type. */
@@ -48,30 +52,72 @@ export default class LogField {
   }
 
   /** Clears all data before the provided timestamp. */
-  clearBeforeTime(timestamp: number) {
-    while (this.data.timestamps.length >= 2 && this.data.timestamps[1] < timestamp) {
-      this.data.timestamps.shift();
-      this.data.values.shift();
-      this.stripingReference = !this.stripingReference;
+  clearBeforeTime(clearTimestamp: number) {
+    for (let i = 0; i < this.data.timestamps.length; i++) {
+      // If there is more than 1 timestamps and if it occurs before the given timestamp, remove it
+      if (this.data.timestamps.length >= 2 && this.data.timestamps[i + 1] < clearTimestamp) {
+        this.stripingReference = !this.stripingReference;
+        continue;
+      }
+
+      this.data.timestamps.splice(0, i);
+      this.data.values.splice(0, i);
+      break;
     }
-    if (this.data.timestamps.length > 0 && this.data.timestamps[0] < timestamp) {
-      this.data.timestamps[0] = timestamp;
+
+    // If there are any left over timestamps, reassign the first timestamp to the given timestamp
+    if (this.data.timestamps.length > 0 && this.data.timestamps[0] < clearTimestamp) {
+      this.data.timestamps[0] = clearTimestamp;
     }
   }
 
-  /** Returns the values in the specified timestamp range. */
-  getRange(start: number, end: number): LogValueSetAny {
+  /** Returns the values in the specified timestamp range.
+   *
+   * If a UUID is provided, requests for single timestamps will cache
+   * the timestamp index to make searches of chronological data faster.
+   */
+  getRange(start: number, end: number, uuid?: string, startOffset?: number): LogValueSetAny {
     let timestamps: number[];
     let values: any[];
 
-    let startValueIndex = this.data.timestamps.findIndex((x) => x > start);
+    let cacheIndex: number | null = null;
+    if (start === end && uuid !== undefined && uuid in this.getRangeCache) {
+      cacheIndex = this.getRangeCache[uuid];
+    }
+
+    let startValueIndex = -1;
+    if (
+      cacheIndex !== null &&
+      cacheIndex < this.data.timestamps.length &&
+      !(this.data.timestamps[cacheIndex] > start)
+    ) {
+      // Search from previous location
+      let rawIndex = this.data.timestamps.slice(cacheIndex).findIndex((x) => x > start);
+      if (rawIndex !== -1) startValueIndex = rawIndex + cacheIndex;
+    }
+    if (startValueIndex === -1) {
+      // Search from start
+      startValueIndex = this.data.timestamps.findIndex((x) => x > start);
+    }
     if (startValueIndex === -1) {
       startValueIndex = this.data.timestamps.length - 1;
     } else if (startValueIndex !== 0) {
       startValueIndex -= 1;
     }
+    if (startOffset !== undefined && startOffset >= -startValueIndex) {
+      startValueIndex += startOffset;
+    }
 
-    let endValueIndex = this.data.timestamps.findIndex((x) => x >= end);
+    let endValueIndex = -1;
+    if (cacheIndex !== null && cacheIndex < this.data.timestamps.length && !(this.data.timestamps[cacheIndex] >= end)) {
+      // Search from previous location
+      let rawIndex = this.data.timestamps.slice(cacheIndex).findIndex((x) => x >= end);
+      if (rawIndex !== -1) endValueIndex = rawIndex + cacheIndex;
+    }
+    if (endValueIndex === -1) {
+      // Search from start
+      endValueIndex = this.data.timestamps.findIndex((x) => x >= end);
+    }
     if (endValueIndex === -1 || endValueIndex === this.data.timestamps.length - 1) {
       // Extend to end of timestamps
       timestamps = this.data.timestamps.slice(startValueIndex);
@@ -80,87 +126,91 @@ export default class LogField {
       timestamps = this.data.timestamps.slice(startValueIndex, endValueIndex + 1);
       values = this.data.values.slice(startValueIndex, endValueIndex + 1);
     }
+
+    if (start === end && uuid !== undefined) {
+      this.getRangeCache[uuid] = startValueIndex;
+    }
+
     return { timestamps: timestamps, values: values };
   }
 
   /** Reads a set of Raw values from the field. */
-  getRaw(start: number, end: number): LogValueSetRaw | undefined {
-    if (this.type === LoggableType.Raw) return this.getRange(start, end);
+  getRaw(start: number, end: number, uuid?: string, startOffset?: number): LogValueSetRaw | undefined {
+    if (this.type === LoggableType.Raw) return this.getRange(start, end, uuid, startOffset);
   }
 
   /** Reads a set of Boolean values from the field. */
-  getBoolean(start: number, end: number): LogValueSetBoolean | undefined {
-    if (this.type === LoggableType.Boolean) return this.getRange(start, end);
+  getBoolean(start: number, end: number, uuid?: string, startOffset?: number): LogValueSetBoolean | undefined {
+    if (this.type === LoggableType.Boolean) return this.getRange(start, end, uuid, startOffset);
   }
 
   /** Reads a set of Number values from the field. */
-  getNumber(start: number, end: number): LogValueSetNumber | undefined {
-    if (this.type === LoggableType.Number) return this.getRange(start, end);
+  getNumber(start: number, end: number, uuid?: string, startOffset?: number): LogValueSetNumber | undefined {
+    if (this.type === LoggableType.Number) return this.getRange(start, end, uuid, startOffset);
   }
 
   /** Reads a set of String values from the field. */
-  getString(start: number, end: number): LogValueSetString | undefined {
-    if (this.type === LoggableType.String) return this.getRange(start, end);
+  getString(start: number, end: number, uuid?: string, startOffset?: number): LogValueSetString | undefined {
+    if (this.type === LoggableType.String) return this.getRange(start, end, uuid, startOffset);
   }
 
   /** Reads a set of BooleanArray values from the field. */
-  getBooleanArray(start: number, end: number): LogValueSetBooleanArray | undefined {
-    if (this.type === LoggableType.BooleanArray) return this.getRange(start, end);
+  getBooleanArray(
+    start: number,
+    end: number,
+    uuid?: string,
+    startOffset?: number
+  ): LogValueSetBooleanArray | undefined {
+    if (this.type === LoggableType.BooleanArray) return this.getRange(start, end, uuid, startOffset);
   }
 
   /** Reads a set of NumberArray values from the field. */
-  getNumberArray(start: number, end: number): LogValueSetNumberArray | undefined {
-    if (this.type === LoggableType.NumberArray) return this.getRange(start, end);
+  getNumberArray(start: number, end: number, uuid?: string, startOffset?: number): LogValueSetNumberArray | undefined {
+    if (this.type === LoggableType.NumberArray) return this.getRange(start, end, uuid, startOffset);
   }
 
   /** Reads a set of StringArray values from the field. */
-  getStringArray(start: number, end: number): LogValueSetStringArray | undefined {
-    if (this.type === LoggableType.StringArray) return this.getRange(start, end);
+  getStringArray(start: number, end: number, uuid?: string, startOffset?: number): LogValueSetStringArray | undefined {
+    if (this.type === LoggableType.StringArray) return this.getRange(start, end, uuid, startOffset);
   }
 
   /** Inserts a new value at the correct index. */
   private putData(timestamp: number, value: any) {
-    if (this.enableLiveSorting) {
-      if (value === null) return;
+    if (value === null) return;
 
-      // Find position to insert based on timestamp
-      let insertIndex: number;
-      if (this.data.timestamps.length > 0 && timestamp > this.data.timestamps[this.data.timestamps.length - 1]) {
-        // There's a good chance this data is at the end of the log, so check that first
-        insertIndex = this.data.timestamps.length;
-      } else {
-        // Adding in the middle, find where to insert it
-        let alreadyExists = false;
-        insertIndex =
-          this.data.timestamps.findLastIndex((x) => {
-            if (alreadyExists) return;
-            if (x === timestamp) alreadyExists = true;
-            return x < timestamp;
-          }) + 1;
-        if (alreadyExists) {
-          this.data.values[this.data.timestamps.indexOf(timestamp)] = value;
-          return;
-        }
-      }
-
-      // Compare to adjacent values
-      if (insertIndex > 0 && logValuesEqual(this.type, value, this.data.values[insertIndex - 1])) {
-        // Same as the previous value
-      } else if (
-        insertIndex < this.data.values.length &&
-        logValuesEqual(this.type, value, this.data.values[insertIndex])
-      ) {
-        // Same as the next value
-        this.data.timestamps[insertIndex] = timestamp;
-      } else {
-        // New value
-        this.data.timestamps.splice(insertIndex, 0, timestamp);
-        this.data.values.splice(insertIndex, 0, value);
-      }
+    // Find position to insert based on timestamp
+    let insertIndex: number;
+    if (this.data.timestamps.length > 0 && timestamp > this.data.timestamps[this.data.timestamps.length - 1]) {
+      // There's a good chance this data is at the end of the log, so check that first
+      insertIndex = this.data.timestamps.length;
     } else {
-      // this.data.timestamps.push(timestamp);
-      // this.data.values.push(value);
-      this.rawData.push({ timestamp: timestamp, value: value });
+      // Adding in the middle, find where to insert it
+      let alreadyExists = false;
+      insertIndex =
+        this.data.timestamps.findLastIndex((x) => {
+          if (alreadyExists) return;
+          if (x === timestamp) alreadyExists = true;
+          return x < timestamp;
+        }) + 1;
+      if (alreadyExists) {
+        this.data.values[this.data.timestamps.indexOf(timestamp)] = value;
+        return;
+      }
+    }
+
+    // Compare to adjacent values
+    if (insertIndex > 0 && logValuesEqual(this.type, value, this.data.values[insertIndex - 1])) {
+      // Same as the previous value
+    } else if (
+      insertIndex < this.data.values.length &&
+      logValuesEqual(this.type, value, this.data.values[insertIndex])
+    ) {
+      // Same as the next value
+      this.data.timestamps[insertIndex] = timestamp;
+    } else {
+      // New value
+      this.data.timestamps.splice(insertIndex, 0, timestamp);
+      this.data.values.splice(insertIndex, 0, value);
     }
   }
 
@@ -215,9 +265,6 @@ export default class LogField {
 
   /** Returns a serialized version of the data from this field. */
   toSerialized(): any {
-    if (!this.enableLiveSorting) {
-      this.sortAndProcess();
-    }
     return {
       type: this.type,
       timestamps: this.data.timestamps,
@@ -243,59 +290,5 @@ export default class LogField {
     field.stripingReference = serializedData.stripingReference;
     field.typeWarning = serializedData.typeWarning;
     return field;
-  }
-  private sortAndProcess() {
-    this.rawData.sort((a: LogRecord, b: LogRecord) => {
-      return a.timestamp - b.timestamp;
-    });
-    // this.rawData.reverse();
-    // let record = this.rawData.pop();
-    // // Bootstrap first value
-    // if (record) {
-    //   this.data.timestamps.push(record.timestamp);
-    //   this.data.values.push(record.value);
-    // }
-    // record = this.rawData.pop();
-    // while (record) {
-    //   // Check if the timestamp is the same as the last one
-    //   if (record.timestamp == this.data.timestamps[this.data.values.length - 1]) {
-    //     // Overwrite the last value
-    //     this.data.values[this.data.values.length - 1] = record.value;
-    //     // If the values are equal do not add the value
-    //   } else if (
-    //     !logValuesEqual(this.type, this.data.values[this.data.values.length - 1], record.value) ||
-    //     this.rawData.length <= 0
-    //   ) {
-    //     // add the value if the prevous value is different or it is the last value in the rawData (make sure final data point is added)
-    //     this.data.timestamps.push(record.timestamp);
-    //     this.data.values.push(record.value);
-    //   }
-    //   record = this.rawData.pop();
-    // }
-
-    if (this.rawData.length > 0) {
-      // Bootstrap first value
-      this.data.timestamps.push(this.rawData[0].timestamp);
-      this.data.values.push(this.rawData[0].value);
-    }
-    for (let i = 1; i < this.rawData.length; i++) {
-      // Check if the timestamp is the same as the last one
-      if (this.rawData[i].timestamp == this.data.timestamps[this.data.values.length - 1]) {
-        // Overwrite the last value
-        this.data.values[this.data.values.length - 1] = this.rawData[i].value;
-        // If the values are equal do not add the value
-        // }
-      } else if (
-        logValuesEqual(this.type, this.rawData[i].value, this.data.values[this.data.values.length - 1]) &&
-        i < this.rawData.length
-      ) {
-      } else {
-        // add the value
-        this.data.timestamps.push(this.rawData[i].timestamp);
-        this.data.values.push(this.rawData[i].value);
-      }
-    }
-    this.rawData = [];
-    this.enableLiveSorting = true;
   }
 }

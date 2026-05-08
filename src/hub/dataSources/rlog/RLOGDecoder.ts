@@ -1,5 +1,12 @@
+// Copyright (c) 2021-2026 Littleton Robotics
+// http://github.com/Mechanical-Advantage
+//
+// Use of this source code is governed by a BSD
+// license that can be found in the LICENSE file
+// at the root directory of this project.
+
 import Log from "../../../shared/log/Log";
-import { PROTO_PREFIX, STRUCT_PREFIX } from "../../../shared/log/LogUtil";
+import { PHOTON_PREFIX, PROTO_PREFIX, STRUCT_PREFIX } from "../../../shared/log/LogUtil";
 import LoggableType from "../../../shared/log/LoggableType";
 import CustomSchemas from "../schema/CustomSchemas";
 import { TEXT_DECODER } from "../wpilog/WPILOGShared";
@@ -22,7 +29,7 @@ export default class RLOGDecoder {
     this.isFile = isFile;
   }
 
-  decode(log: Log, dataArray: Buffer, progressCallback?: (progress: number) => void): boolean {
+  decode(log: Log, dataArray: Uint8Array, progressCallback?: (progress: number) => void): boolean {
     let dataBuffer = new DataView(dataArray.buffer);
     let offset = 0;
 
@@ -186,6 +193,9 @@ export default class RLOGDecoder {
                       } else {
                         log.putStruct(key, timestamp, value, schemaType, false);
                       }
+                    } else if (type.startsWith(PHOTON_PREFIX)) {
+                      let schemaType = type.split(PHOTON_PREFIX)[1];
+                      log.putPhotonStruct(key, timestamp, value, schemaType);
                     } else if (type.startsWith(PROTO_PREFIX)) {
                       let schemaType = type.split(PROTO_PREFIX)[1];
                       log.putProto(key, timestamp, value, schemaType);

@@ -2,3 +2,5 @@ node_modules
 dist
 bundles
 src/licenses.json
+docs/build
+xr

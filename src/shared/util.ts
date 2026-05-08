@@ -1,3 +1,10 @@
+// Copyright (c) 2021-2026 Littleton Robotics
+// http://github.com/Mechanical-Advantage
+//
+// Use of this source code is governed by a BSD
+// license that can be found in the LICENSE file
+// at the root directory of this project.
+
 /** Checks whether two arrays are equal. */
 export function arraysEqual(a: any[], b: any[]): boolean {
   return (
@@ -25,7 +32,7 @@ export function checkArrayType(value: unknown, type: string): boolean {
 }
 
 /** Creates a deep copy of an object by converting to and from JSON. */
-export function jsonCopy(value: any): any {
+export function jsonCopy<T>(value: T): T {
   return JSON.parse(JSON.stringify(value));
 }
 
@@ -34,6 +41,23 @@ export function htmlEncode(text: string): string {
   return text.replace(/[\u00A0-\u9999<>\&]/g, (i) => {
     return "&#" + i.charCodeAt(0) + ";";
   });
+}
+
+/** Returns an array of ascending integers with the specified length. */
+export function indexArray(length: number): number[] {
+  return Array.from({ length: length }, (_, i) => i);
+}
+
+/** Returns whether the character at the specified index is capitalized. */
+export function charIsCapital(input: string, index: number): boolean {
+  let char = input.charAt(index);
+  return char === char.toUpperCase();
+}
+
+/** Calculates a mock progress value. */
+export function calcMockProgress(time: number, maxPercent = 0.6): number {
+  // https://www.desmos.com/calculator/86u4rnu8ob
+  return maxPercent - maxPercent / (0.1 * time + 1);
 }
 
 /** Adjust the brightness of a HEX color.*/
@@ -78,7 +102,14 @@ export function scaleValue(value: number, oldRange: [number, number], newRange: 
   return ((value - oldRange[0]) / (oldRange[1] - oldRange[0])) * (newRange[1] - newRange[0]) + newRange[0];
 }
 
-/** Converts a value between two ranges, with caching for better performance.. */
+/** Converts a value between two ranges. */
+export function scaleValueClamped(value: number, oldRange: [number, number], newRange: [number, number]): number {
+  return (
+    clampValue((value - oldRange[0]) / (oldRange[1] - oldRange[0]), 0, 1) * (newRange[1] - newRange[0]) + newRange[0]
+  );
+}
+
+/** Converts a value between two ranges, with caching for better performance. */
 export class ValueScaler {
   private a: number;
   private b: number;
@@ -150,4 +181,70 @@ export function concatBuffers(arrays: Uint8Array[]): Uint8Array {
     position += array.byteLength;
   });
   return result;
+}
+
+export function calcAxisStepSize(dataRange: [number, number], pixelRange: number, stepSizeTarget: number): number {
+  let stepCount = pixelRange / stepSizeTarget;
+  let stepValueApprox = (dataRange[1] - dataRange[0]) / stepCount;
+  let roundBase = 10 ** Math.floor(Math.log10(stepValueApprox));
+  let multiplierLookup = [0, 1, 2, 2, 5, 5, 5, 5, 5, 10, 10]; // Use friendly numbers if possible
+  return roundBase * multiplierLookup[Math.round(stepValueApprox / roundBase)];
+}
+
+export function getSpiralIndex(x: number, y: number): number {
+  // https://stackoverflow.com/questions/9970134/get-spiral-index-from-location
+
+  type Point = { x: number; y: number };
+
+  const interior = (p: Point): number => {
+    let a = Math.max(Math.abs(p.x), Math.abs(p.y));
+    return (2 * a - 1) * (2 * a - 1);
+  };
+
+  const startPoint = (p: Point): Point => {
+    let a = Math.max(Math.abs(p.x), Math.abs(p.y));
+    return {
+      x: a,
+      y: -(a - 1)
+    };
+  };
+
+  const offsetFirstRow = (pStart: Point, p: Point): number => {
+    return p.y - pStart.y + 1;
+  };
+
+  let current = { x: x, y: y };
+  let a = Math.max(Math.abs(current.x), Math.abs(current.y));
+  let offset = 0;
+  let interiorCount = interior(current);
+  let start = startPoint(current);
+
+  if (current.x === a && current.y >= start.y) {
+    offset = offsetFirstRow(start, current);
+    return offset + interiorCount;
+  } else if (current.y === a) {
+    let start2 = { x: a, y: a };
+    let off1 = offsetFirstRow(start, start2);
+    let off2 = start2.x - current.x;
+    offset = off1 + off2;
+    return offset + interiorCount;
+  } else if (current.x === -a) {
+    let start2 = { x: a, y: a };
+    let off1 = offsetFirstRow(start, start2);
+    let start3 = { x: -a, y: a };
+    let off2 = start2.x - start3.x;
+    let off3 = start3.y - current.y;
+    offset = off1 + off2 + off3;
+    return offset + interiorCount;
+  } else {
+    let start2 = { x: a, y: a };
+    let off1 = offsetFirstRow(start, start2);
+    let start3 = { x: -a, y: a };
+    let off2 = start2.x - start3.x;
+    let off3 = start3.y - current.y;
+    let start4 = { x: -a, y: -a };
+    let off4 = current.x - start4.x;
+    offset = off1 + off2 + off3 + off4;
+    return interiorCount + offset;
+  }
 }

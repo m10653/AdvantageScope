@@ -1,13 +1,30 @@
+// Copyright (c) 2021-2026 Littleton Robotics
+// http://github.com/Mechanical-Advantage
+//
+// Use of this source code is governed by a BSD
+// license that can be found in the LICENSE file
+// at the root directory of this project.
+
 import LoggableType from "../../../shared/log/LoggableType";
 import LiveDataTuner from "../LiveDataTuner";
 import { NT4_Client } from "./NT4";
-import { AKIT_PREFIX, WPILOG_PREFIX } from "./NT4Source";
+import { AKIT_PREFIX, AKIT_TUNING_PREFIX, WPILOG_PREFIX } from "./NT4Source";
 
 export default class NT4Tuner implements LiveDataTuner {
   private client: NT4_Client;
+  private akitMode: boolean;
 
-  constructor(client: NT4_Client) {
+  constructor(client: NT4_Client, akitMode: boolean) {
     this.client = client;
+    this.akitMode = akitMode;
+  }
+
+  hasTunableFields(): boolean {
+    if (this.akitMode) {
+      return !window.log.getFieldKeys().every((key) => !key.startsWith(AKIT_TUNING_PREFIX));
+    } else {
+      return true;
+    }
   }
 
   isTunable(key: string): boolean {
@@ -16,6 +33,7 @@ export default class NT4Tuner implements LiveDataTuner {
     return (
       (type === LoggableType.Number || type === LoggableType.Boolean) &&
       !remoteKey.startsWith(AKIT_PREFIX) &&
+      (window.log.getField("NT:/Robot/DogLog/Options") === null || !remoteKey.startsWith("/Robot")) &&
       !window.log.isGenerated(key)
     );
   }
@@ -45,6 +63,14 @@ export default class NT4Tuner implements LiveDataTuner {
   }
 
   private getRemoteKey(key: string): string {
-    return key.slice(WPILOG_PREFIX.length);
+    if (this.akitMode) {
+      if (key.startsWith(AKIT_TUNING_PREFIX)) {
+        return key;
+      } else {
+        return AKIT_PREFIX + key;
+      }
+    } else {
+      return key.slice(WPILOG_PREFIX.length);
+    }
   }
 }

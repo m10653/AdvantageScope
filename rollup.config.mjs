@@ -1,32 +1,72 @@
+// Copyright (c) 2021-2026 Littleton Robotics
+// http://github.com/Mechanical-Advantage
+//
+// Use of this source code is governed by a BSD
+// license that can be found in the LICENSE file
+// at the root directory of this project.
+
+import { getBabelOutputPlugin } from "@rollup/plugin-babel";
 import commonjs from "@rollup/plugin-commonjs";
 import json from "@rollup/plugin-json";
 import nodeResolve from "@rollup/plugin-node-resolve";
 import replace from "@rollup/plugin-replace";
+import terser from "@rollup/plugin-terser";
 import typescript from "@rollup/plugin-typescript";
 import fs from "fs";
 import cleanup from "rollup-plugin-cleanup";
 import replaceRegEx from "rollup-plugin-re";
 
-function bundle(input, output, isMain, external = []) {
-  const isWpilib = process.env.ASCOPE_DISTRIBUTOR === "WPILIB";
+const isWpilib = process.env.ASCOPE_DISTRIBUTION === "WPILIB";
+const isLite = process.env.ASCOPE_DISTRIBUTION === "LITE";
+const licenseHeader =
+  "// Copyright (c) 2021-2026 Littleton Robotics\n// http://github.com/Mechanical-Advantage\n//\n// Use of this source code is governed by a BSD\n// license that can be found in the LICENSE file\n// at the resources directory of this application.\n";
+
+function bundle(input, output, isMain, isXRClient, external = []) {
+  const packageJson = JSON.parse(
+    fs.readFileSync("package.json", {
+      encoding: "utf-8"
+    })
+  );
   return {
     input: "src/" + input,
     output: {
-      file: "bundles/" + output,
-      format: isMain ? "cjs" : "es"
+      file: (isLite ? "lite/static/" : "") + "bundles/" + output,
+      format: isMain ? "cjs" : "es",
+      banner: licenseHeader
     },
     context: "this",
     external: external,
     plugins: [
       typescript(),
-      nodeResolve(),
+      nodeResolve({
+        preferBuiltins: true
+      }),
       commonjs(),
-      cleanup(),
+      ...(isXRClient
+        ? [
+            getBabelOutputPlugin({
+              presets: [["@babel/preset-env", { modules: false }]],
+              compact: true,
+              targets: "iOS 16" // AdvantageScope XR is built for iOS 16
+            }),
+            terser()
+          ]
+        : isLite
+        ? [
+            getBabelOutputPlugin({
+              presets: [["@babel/preset-env", { modules: false }]],
+              compact: true,
+              targets: "> 0.1%, not dead"
+            }),
+            terser({ mangle: { reserved: ["Module"] } })
+          ]
+        : [cleanup()]),
       json(),
       replace({
         preventAssignment: true,
         values: {
-          __distributor__: isWpilib ? "WPILib" : "FRC6328",
+          __distribution__: isWpilib ? "WPILib" : isLite ? "Lite" : "FRC6328",
+          __version__: packageJson.version,
           __build_date__: new Date().toLocaleString("en-US", {
             timeZone: "UTC",
             hour12: false,
@@ -38,11 +78,7 @@ function bundle(input, output, isMain, external = []) {
             second: "numeric",
             timeZoneName: "short"
           }),
-          __copyright__: JSON.parse(
-            fs.readFileSync("package.json", {
-              encoding: "utf-8"
-            })
-          ).build.copyright
+          __copyright__: packageJson.build.copyright
         }
       }),
       replaceRegEx({
@@ -52,6 +88,13 @@ function bundle(input, output, isMain, external = []) {
           {
             test: /eval.*\(moduleName\);/g,
             replace: "undefined;"
+          },
+
+          // Remove dependency on node:sqlite (not actually
+          // used, so just replace with stand-in dependency)
+          {
+            test: /node:sqlite/g,
+            replace: "fs"
           }
         ]
       })
@@ -65,45 +108,91 @@ function bundle(input, output, isMain, external = []) {
   };
 }
 
-const mainBundles = [
-  bundle("main/main.ts", "main.js", true, [
-    "electron",
-    "electron-fetch",
-    "fs",
-    "jsonfile",
-    "net",
-    "os",
-    "path",
-    "ssh2",
-    "download",
-    "ytdl-core",
-    "tesseract.js"
-  ]),
-  bundle("preload.ts", "preload.js", true, ["electron"])
+const mainBundles = isLite
+  ? [bundle("main/lite/main.ts", "main.js", false, false)]
+  : [
+      bundle("main/electron/main.ts", "main.js", true, false, [
+        "electron",
+        "electron-fetch",
+        "fs",
+        "jsonfile",
+        "net",
+        "os",
+        "ws",
+        "http",
+        "path",
+        "basic-ftp",
+        "download",
+        "youtube-dl-exec",
+        "tesseract.js",
+        "lzma-native",
+        "@rev-robotics/revlog-converter"
+      ]),
+      bundle("preload.ts", "preload.js", true, false, ["electron"])
+    ];
+const largeRendererBundles = [
+  bundle("hub/hub.ts", "hub.js", false, false),
+  ...(isLite ? [] : [bundle("satellite.ts", "satellite.js", false, false)])
 ];
-const largeRendererBundles = [bundle("hub/hub.ts", "hub.js", false), bundle("satellite.ts", "satellite.js", false)];
 const smallRendererBundles = [
-  bundle("editRange.ts", "editRange.js", false),
-  bundle("unitConversion.ts", "unitConversion.js", false),
-  bundle("renameTab.ts", "renameTab.js", false),
-  bundle("editFov.ts", "editFov.js", false),
-  bundle("export.ts", "export.js", false),
-  bundle("download.ts", "download.js", false),
-  bundle("preferences.ts", "preferences.js", false),
-  bundle("licenses.ts", "licenses.js", false)
+  bundle("editRange.ts", "editRange.js", false, false),
+  bundle("unitConversion.ts", "unitConversion.js", false, false),
+  bundle("renameTab.ts", "renameTab.js", false, false),
+  bundle("editFov.ts", "editFov.js", false, false),
+  bundle("sourceListHelp.ts", "sourceListHelp.js", false, false),
+  bundle("betaWelcome.ts", "betaWelcome.js", false, false),
+  bundle("preferences.ts", "preferences.js", false, false),
+  bundle("licenses.ts", "licenses.js", false, false),
+  bundle("download.ts", "download.js", false, false),
+  ...(isLite
+    ? [bundle("uploadAsset.ts", "uploadAsset.js", false, false)]
+    : [bundle("export.ts", "export.js", false, false)])
 ];
 const workerBundles = [
-  bundle("hub/dataSources/rlog/rlogWorker.ts", "hub$rlogWorker.js", false),
-  bundle("hub/dataSources/wpilog/wpilogWorker.ts", "hub$wpilogWorker.js", false),
-  bundle("hub/dataSources/dslog/dsLogWorker.ts", "hub$dsLogWorker.js", false),
-  bundle("hub/exportWorker.ts", "hub$exportWorker.js", false)
+  bundle("hub/dataSources/csv/csvWorker.ts", "hub$csvWorker.js", false, false),
+  bundle("hub/dataSources/rlog/rlogWorker.ts", "hub$rlogWorker.js", false, false),
+  bundle("hub/dataSources/roadrunnerlog/roadRunnerWorker.ts", "hub$roadRunnerWorker.js", false, false),
+  bundle("hub/dataSources/wpilog/wpilogWorker.ts", "hub$wpilogWorker.js", false, false),
+  bundle("hub/dataSources/dslog/dsLogWorker.ts", "hub$dsLogWorker.js", false, false),
+  ...(isLite ? [] : [bundle("hub/exportWorker.ts", "hub$exportWorker.js", false, false)]),
+  bundle("shared/renderers/field3d/workers/loadField.ts", "shared$loadField.js", false, false),
+  bundle("shared/renderers/field3d/workers/loadRobot.ts", "shared$loadRobot.js", false, false)
 ];
+const xrBundles = [
+  bundle("xrClient/xrClient.ts", "xrClient.js", false, true),
+  bundle("xrControls.ts", "xrControls.js", false, false)
+];
+const runOwletDownload = {
+  input: "src/runOwletDownload.ts",
+  output: {
+    file: "runOwletDownload.js",
+    format: "cjs"
+  },
+  context: "this",
+  external: ["download"],
+  plugins: [
+    typescript(),
+    nodeResolve({
+      preferBuiltins: true
+    }),
+    commonjs(),
+    json()
+  ],
+  onwarn() {}
+};
 
 export default (cliArgs) => {
   if (cliArgs.configMain === true) return mainBundles;
   if (cliArgs.configLargeRenderers === true) return largeRendererBundles;
   if (cliArgs.configSmallRenderers === true) return smallRendererBundles;
   if (cliArgs.configWorkers === true) return workerBundles;
+  if (cliArgs.configXR === true) {
+    if (isLite) process.exit();
+    return xrBundles;
+  }
+  if (cliArgs.configRunOwletDownload === true) return runOwletDownload;
 
-  return [...mainBundles, ...largeRendererBundles, ...smallRendererBundles, ...workerBundles];
+  return isLite
+    ? [...mainBundles, ...largeRendererBundles, ...smallRendererBundles, ...workerBundles]
+    : [...mainBundles, ...largeRendererBundles, ...smallRendererBundles, ...workerBundles, ...xrBundles];
 };

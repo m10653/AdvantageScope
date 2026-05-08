@@ -1,3 +1,10 @@
+// Copyright (c) 2021-2026 Littleton Robotics
+// http://github.com/Mechanical-Advantage
+//
+// Use of this source code is governed by a BSD
+// license that can be found in the LICENSE file
+// at the root directory of this project.
+
 import { IWritable, McapWriter } from "@mcap/core";
 import { IReadable } from "@mcap/core/dist/esm/src/types";
 import ExportOptions from "../shared/ExportOptions";
@@ -11,6 +18,7 @@ import LogExporter from "./LogExporter";
 
 self.onmessage = async (event) => {
   // WORKER SETUP
+  self.onmessage = null;
   let { id, payload } = event.data;
   function resolve(result: any) {
     self.postMessage({ id: id, payload: result });
