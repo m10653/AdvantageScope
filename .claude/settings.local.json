@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(git fetch *)",
+      "PowerShell(head *)",
+      "PowerShell(wc *)",
+      "PowerShell(git merge *)",
+      "PowerShell(grep *)",
+      "PowerShell(git ls-tree *)",
+      "PowerShell(git *)",
+      "PowerShell(tail *)"
+    ]
+  }
+}
